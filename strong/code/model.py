@@ -480,3 +480,111 @@ class DCLAE(BasicModel):
         input_matrix = np.array(self.valid_matrix[users].toarray())
         eval_output = input_matrix @ self.W
         return torch.FloatTensor(eval_output)
+class EASE_DAN(BasicModel):
+    def __init__(self, config:dict, dataset:BasicDataset):
+        super(EASE_DAN, self).__init__()
+        self.config = config
+        self.dataset = dataset
+        from world import device
+        self.device = device
+        self.reg_p = config['reg_p']
+        self.alpha = 1 - config['alpha']
+        self.beta = config['beta']
+        self.__init_weight()
+    
+    def __init_weight(self):
+        X = self.dataset.UserItemNet
+        self.valid_matrix = self.dataset.validUserItemNet.tocsr()
+        self.test_matrix = self.dataset.testUserItemNet.tocsr()
+        
+        train_start = time()
+        item_counts = np.array(X.sum(axis=0))
+        user_counts = np.array(X.sum(axis=1))
+        X_T = X.multiply(np.power(user_counts, -self.beta)).T
+        G = X_T.dot(X).toarray()
+        lmbda = self.reg_p + (self.config.get('drop_p', 0.5) / (1 - self.config.get('drop_p', 0.5))) * item_counts
+        G[np.diag_indices(X.shape[1])] += lmbda.reshape(-1)
+        
+        P = np.linalg.inv(G)
+        B_DLAE = np.eye(X.shape[1]) - P / np.diag(P)
+        item_power_term = np.power(item_counts, -(1 - self.alpha))
+        W = B_DLAE * (1/item_power_term).reshape(-1, 1) * item_power_term
+        W[np.diag_indices(X.shape[1])] = 0
+        
+        self.W_gpu = torch.FloatTensor(W).to(self.device)
+        self.train_time = time() - train_start
+        self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
+
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.test_matrix, self.W_gpu)
+
+    def getvalidUsersRating(self, users):
+        return self._get_batch_ratings(users, self.valid_matrix, self.W_gpu)
+ 
+class IPS_LAE(BasicModel):
+    def __init__(self, config:dict, dataset:BasicDataset):
+        super(IPS_LAE, self).__init__()
+        self.dataset = dataset
+        from world import device
+        self.device = device
+        
+        # 하이퍼파라미터 설정
+        self.reg_lambda = config.get('reg_lambda', 500.0)
+        self.wbeta = config.get('wbeta', 0.4)
+        self.wtype = config.get('wtype', 'logsigmoid')  # powerlaw | logsigmoid
+        self.eps = 1e-12
+        self.__init_weight()
+
+    def _compute_inv_propensity(self, X):
+        """아이템별 역 성향 점수(Inverse Propensity Score)를 계산합니다."""
+        pop = np.array(X.sum(axis=0)).flatten()
+        
+        if self.wtype == 'powerlaw':
+            # Power-law 기반 성향 점수 계산
+            norm_pop = pop / (np.max(pop) + self.eps)
+            p = np.power(norm_pop, self.wbeta)
+        elif self.wtype == 'logsigmoid':
+            # Log-sigmoid 기반 성향 점수 계산 (아이템 빈도 로그 스케일링)
+            log_freqs = np.log(pop + 1)
+            alpha_logit = -self.wbeta * (np.min(log_freqs) + np.max(log_freqs)) / 2
+            p = 1 / (1 + np.exp(-(alpha_logit + self.wbeta * log_freqs)))
+        else:
+            p = np.ones_like(pop)
+            
+        # 역 성향 점수 반환 (GPU 텐서)
+        return torch.tensor(1 / (p + self.eps), dtype=torch.float32, device=self.device)
+
+    def __init_weight(self):
+        X = self.dataset.UserItemNet
+        self.valid_matrix = self.dataset.validUserItemNet.tocsr()
+        self.test_matrix = self.dataset.testUserItemNet.tocsr()
+        
+        train_start = time()
+        
+        # 1. Gram Matrix 계산 및 정규화 (CPU)
+        print("  computing gram matrix and inverting...")
+        G = (X.T @ X).toarray()
+        G[np.diag_indices(X.shape[1])] += self.reg_lambda
+        
+        # 2. EASE 해법 (Closed-form solution)
+        P = np.linalg.inv(G)
+        diag_P = np.diag(P)
+        W_np = -P / (diag_P + self.eps)
+        np.fill_diagonal(W_np, 0)
+        
+        W_torch = torch.tensor(W_np, dtype=torch.float32, device=self.device)
+        
+        # 3. IPS Weighting 적용 (GPU)
+        # 아이템별로 p_j에 반비례하도록 가중치 행렬의 컬럼을 스케일링
+        inv_p = self._compute_inv_propensity(X)
+        self.W_gpu = W_torch * inv_p.view(1, -1)
+        
+        self.train_time = time() - train_start
+        print(f"costing {self.train_time}s for training")
+        self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
+
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.test_matrix, self.W_gpu)
+
+    def getvalidUsersRating(self, users):
+        return self._get_batch_ratings(users, self.valid_matrix, self.W_gpu)

@@ -85,13 +85,12 @@ def run_experiment(model, dataset, params, gpu, is_strong=True):
 
 def main():
     parser = argparse.ArgumentParser(description="Grid Search for CLAE/DCLAE")
-    parser.add_argument('--model', type=str, default='CLAE', choices=['CLAE', 'DCLAE', 'EASE', 'GFCF', 'RLAE', 'RDLAE'])
+    parser.add_argument('--model', type=str, default='CLAE', choices=['CLAE', 'DCLAE', 'EASE', 'GFCF', 'RLAE', 'RDLAE', 'EASE_DAN', 'IPS_LAE'])
     parser.add_argument('--dataset', type=str, default='yelp2018')
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--mode', type=str, default='strong', choices=['strong', 'weak'])
     
     # 그리드 설정 인자들
-    # 형식: --param start end num scale
     parser.add_argument('--reg_lambda_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
                         default=[0.1, 100.0, 5, 'log'], help='Grid for reg_lambda')
     parser.add_argument('--alpha_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
@@ -100,6 +99,13 @@ def main():
                         default=[0.0, 1.0, 3, 'linear'], help='Grid for beta')
     parser.add_argument('--dropout_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
                         default=[0.1, 0.7, 4, 'linear'], help='Grid for dropout_p (DCLAE only)')
+    parser.add_argument('--reg_p_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
+                        default=[10, 1000, 5, 'log'], help='Grid for reg_p (EASE family)')
+    parser.add_argument('--xi_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
+                        default=[0.0, 1.0, 5, 'linear'], help='Grid for xi (RLAE only)')
+    parser.add_argument('--wbeta_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
+                        default=[0.1, 1.0, 5, 'linear'], help='Grid for wbeta (IPS_LAE only)')
+    parser.add_argument('--wtype', type=str, default='logsigmoid', help='Fixed wtype for IPS_LAE')
     
     args = parser.parse_args()
 
@@ -111,16 +117,30 @@ def main():
     def process_grid_arg(arg_list):
         return generate_range(float(arg_list[0]), float(arg_list[1]), int(arg_list[2]), arg_list[3])
 
-    if args.model in ['CLAE', 'DCLAE']:
+    if args.model in ['CLAE', 'DCLAE', 'RLAE', 'RDLAE']:
         grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
         grid['alpha'] = process_grid_arg(args.alpha_grid)
         grid['beta'] = process_grid_arg(args.beta_grid)
         if args.model == 'DCLAE':
             grid['dropout_p'] = process_grid_arg(args.dropout_grid)
+        if args.model in ['RLAE', 'RDLAE']:
+            grid['xi'] = process_grid_arg(args.xi_grid)
     
-    # 다른 모델 예시 (EASE 등)
     elif args.model == 'EASE':
-        grid['reg_p'] = process_grid_arg([10, 1000, 5, 'log'])
+        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
+
+    elif args.model == 'EASE_DAN':
+        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
+        grid['alpha'] = process_grid_arg(args.alpha_grid)
+        grid['beta'] = process_grid_arg(args.beta_grid)
+
+    elif args.model == 'IPS_LAE':
+        grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
+        grid['wbeta'] = process_grid_arg(args.wbeta_grid)
+        grid['wtype'] = [args.wtype]
+
+    elif args.model == 'GFCF':
+        grid['alpha'] = process_grid_arg(args.alpha_grid)
 
     keys = list(grid.keys())
     combinations = [dict(zip(keys, v)) for v in product(*grid.values())]

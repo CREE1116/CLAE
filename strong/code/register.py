@@ -22,4 +22,6 @@ MODELS = {
     'GFCF': model.GFCF,
     'CLAE': model.CLAE,
     'DCLAE': model.DCLAE,
+    'EASE_DAN': model.EASE_DAN,
+    'IPS_LAE': model.IPS_LAE,
 }

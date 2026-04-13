@@ -26,5 +26,8 @@ def parse_args():
     parser.add_argument('--beta', type=float, default=0.5)
     # DCLAE hparams
     parser.add_argument('--dropout_p', type=float, default=0.3)
+    # IPS_LAE hparams
+    parser.add_argument('--wbeta', type=float, default=0.4)
+    parser.add_argument('--wtype', type=str, default='logsigmoid', choices=['powerlaw', 'logsigmoid'])
 
     return parser.parse_args()
