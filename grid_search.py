@@ -6,6 +6,7 @@ from itertools import product
 from tqdm import tqdm
 import re
 import argparse
+import sys
 
 def generate_range(start, end, num, scale='linear'):
     """
@@ -46,8 +47,9 @@ def run_experiment(model, dataset, params, gpu, is_strong=True):
     base_dir = "strong" if is_strong else "weak"
     script_path = os.path.join(base_dir, "code", "main.py")
     
+    # 현재 실행 중인 파이썬 인터프리터(sys.executable)를 사용하여 가상환경 유지
     cmd = [
-        "python", script_path,
+        sys.executable, script_path,
         "--model", model,
         "--dataset", dataset,
         "--gpu", str(gpu)
