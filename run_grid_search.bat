@@ -22,17 +22,17 @@ echo ==========================================
 for %%M in (%MODELS%) do (
     for %%D in (%DATASETS%) do (
         echo.
-        echo [!time!] >>> Running Model: %%M | Dataset: %%D
+        echo [!time!] --- Running Model: %%M / Dataset: %%D
         
         if "%%M"=="CLAE" (
             uv run python grid_search.py --model CLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_lambda_grid 0.1 1000.0 10 log ^
-                --alpha_grid 0.1 1.0 10 linear ^
+                --reg_lambda_grid 0.1 1000.0 5 log ^
+                --alpha_grid 0.0 1.0 11 linear ^
                 --beta_grid 0.5 0.5 1 linear
         )
         if "%%M"=="EASE" (
             uv run python grid_search.py --model EASE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_p_grid 10.0 10000.0 10 log
+                --reg_p_grid 10.0 5000.0 10 log
         )
         if "%%M"=="RLAE" (
             uv run python grid_search.py --model RLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
@@ -46,9 +46,8 @@ for %%M in (%MODELS%) do (
                 --alpha_grid 0.0 1.0 11 linear
         )
         if "%%M"=="EASE_DAN" (
-            :: EASE_DAN: reg_p, alpha, beta
             uv run python grid_search.py --model EASE_DAN --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_p_grid 0.1 1000.0 5 log ^
+                --reg_p_grid 10.0 5000.0 5 log ^
                 --alpha_grid 0.0 1.0 3 linear ^
                 --beta_grid 0.0 1.0 3 linear
         )
@@ -58,6 +57,12 @@ for %%M in (%MODELS%) do (
                 --reg_lambda_grid 0.1 1000.0 5 log ^
                 --wbeta_grid 0.1 1.0 5 linear ^
                 --wtype logsigmoid
+                
+            :: IPS_LAE: powerlaw mode
+            uv run python grid_search.py --model IPS_LAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
+                --reg_lambda_grid 0.1 1000.0 5 log ^
+                --wbeta_grid 0.1 1.0 5 linear ^
+                --wtype powerlaw
         )
         
         if !errorlevel! equ 0 (
