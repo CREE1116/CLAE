@@ -45,11 +45,11 @@ def parse_results(output):
 def run_experiment(model, dataset, params, gpu, is_strong=True):
     # strong 또는 weak 디렉토리 결정
     base_dir = "strong" if is_strong else "weak"
-    script_path = os.path.join(base_dir, "code", "main.py")
+    exec_dir = os.path.join(base_dir, "code")
     
-    # 현재 실행 중인 파이썬 인터프리터(sys.executable)를 사용하여 가상환경 유지
+    # 작업 디렉토리를 변경하므로 script_path는 main.py가 됩니다.
     cmd = [
-        sys.executable, script_path,
+        sys.executable, "main.py",
         "--model", model,
         "--dataset", dataset,
         "--gpu", str(gpu)
@@ -58,8 +58,8 @@ def run_experiment(model, dataset, params, gpu, is_strong=True):
     for k, v in params.items():
         cmd.extend([f"--{k}", f"{v:.6f}" if isinstance(v, float) else str(v)])
     
-    print(f"\nRunning: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    print(f"\nRunning: {' '.join(cmd)} in {exec_dir}")
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=exec_dir)
     
     if result.returncode != 0:
         print(f"Error running {model}: {result.stderr}")
