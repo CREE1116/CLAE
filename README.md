@@ -1,15 +1,56 @@
-# RLAE & RDLAE - It's Enough: Relaxing Diagonal Constraints in Linear Autoencoders for Recommendation (SIGIR 2023)
+# CLAE & DCLAE: Causal Linear AutoEncoder Framework
 
-This is the official code for our accepted SIGIR 2023 paper: <br>[`It's Enough: Relaxing Diagonal Constraints in Linear Autoencoders for Recommendation`](https://arxiv.org/abs/2305.12922).</br>
+This project is a framework for Linear AutoEncoders for Recommendation, including **RLAE**, **RDLAE**, and the newly added **CLAE** (Causal Linear AutoEncoder) and **DCLAE** (Dropout CLAE).
 
+## Setup with `uv` (Recommended)
 
-We implemented our framework based on the following github repositories; [**MultVAE**](https://github.com/dawenl/vae_cf) and [**LT-OCF**](https://github.com/jeongwhanchoi/LT-OCF).</br> 
+This project now supports [uv](https://github.com/astral-sh/uv) for faster and more reliable dependency management.
 
-The slides can be found [here](https://drive.google.com/file/d/1gW-E8iFiUScBBs_N7QEIjEsYlyRr2jrG/view?usp=sharing).
+### Install dependencies
+```bash
+uv sync
+```
 
-## Citation
+### Run experiments
+```bash
+# Example: Run CLAE on yelp2018
+uv run strong/code/main.py --model CLAE --dataset yelp2018 --gpu 0
+```
 
-Please cite our paper if using this code.
+---
+
+## Grid Search
+
+You can perform grid search for hyperparameters using the provided `grid_search.py` script.
+
+### Usage
+```bash
+# Grid search for CLAE
+uv run grid_search.py --model CLAE --dataset yelp2018 --gpu 0
+
+# Grid search for DCLAE
+uv run grid_search.py --model DCLAE --dataset yelp2018 --gpu 0
+```
+Results will be saved as CSV files in the `results/` directory.
+
+---
+
+## Datasets
+- Strong generalization: [Link](https://drive.google.com/file/d/1qRDWRMp5U86jwInnWT6OirsjT4UKhNE2/view?usp=sharing)
+- Weak generalization: [Link](https://drive.google.com/file/d/1Yo5roKrJ3mkKTOSHxFNz9RoOjEueQnpS/view?usp=sharing)
+
+---
+
+## Arguments (see more arguments in `parse.py`)
+- **model**: EASE, EDLAE, RLAE, RDLAE, **CLAE**, **DCLAE**
+- **reg_lambda** (CLAE/DCLAE): Ridge regularization parameter (default: 10.0)
+- **alpha** (CLAE/DCLAE): Item-side normalization parameter (default: 0.5)
+- **beta** (CLAE/DCLAE): User-side IPW parameter (default: 0.5)
+- **dropout_p** (DCLAE): Dropout regularization probability (default: 0.3)
+
+---
+
+## Original Citation (SIGIR 2023)
 
 ```
 @inproceedings{MoonKL23RDLAE,
@@ -22,45 +63,3 @@ Please cite our paper if using this code.
   year      = {2023},
 }
 ```
-
----
-
-## Setup Python environment
-
-### Install python environment
-
-```bash
-conda env create -f environment.yml   
-```
-
-### Activate environment
-```bash
-conda activate RDLAE
-```
-
----
-
-## Datasets
-- Strong generalization: https://drive.google.com/file/d/1qRDWRMp5U86jwInnWT6OirsjT4UKhNE2/view?usp=sharing
-- Weak generalization: https://drive.google.com/file/d/1Yo5roKrJ3mkKTOSHxFNz9RoOjEueQnpS/view?usp=sharing
-
----
-
-## Reproducibility
-### Usage
-- To reproduce the results of Table 2 (strong generalization), go to the 'strong' directory.
-- To reproduce the results of Table 3 (weak generalization), go to the 'weak' directory.
-
-#### In terminal
-- Run the shell file for one of the datasets at the specific directory, i.e., 'strong' and 'weak', of the project.
-
-#### Arguments (see more arguments in `parse.py`)
-- dataset
-    - strong: ml-20m, netflix, msd, gowalla, yelp2018, amazon-book
-    - weak: gowalla, yelp2018, amazon-book
-- model
-    - EASE, EDLAE, **RLAE**, **RDLAE**
-- diag_const (for EASE and EDLAE)
-    - True, False
-- drop_p, xi
-    - [0.1, 0.2, ..., 0.9]

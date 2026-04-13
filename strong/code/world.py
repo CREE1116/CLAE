@@ -30,6 +30,11 @@ config['drop_p'] = args.drop_p
 config['xi'] = args.xi
 # GF-CF hparams
 config['alpha'] = args.alpha
+# CLAE hparams
+config['reg_lambda'] = args.reg_lambda
+config['beta'] = args.beta
+# DCLAE hparams
+config['dropout_p'] = args.dropout_p
 
 CORES = multiprocessing.cpu_count() // 2
 

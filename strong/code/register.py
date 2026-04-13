@@ -20,4 +20,6 @@ MODELS = {
     'RLAE': model.RLAE,
     'RDLAE': model.RDLAE,
     'GFCF': model.GFCF,
+    'CLAE': model.CLAE,
+    'DCLAE': model.DCLAE,
 }

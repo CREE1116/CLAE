@@ -1,0 +1,18 @@
+[project]
+name = "clae"
+version = "0.1.0"
+description = "Causal Linear AutoEncoder (CLAE) framework"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy==1.22.4",
+    "scipy==1.8.1",
+    "torch==1.7.1",
+    "h5py==3.7.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pandas",
+    "tqdm",
+]
