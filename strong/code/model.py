@@ -309,7 +309,7 @@ class EDLAE(BasicModel):
 class CLAE(BasicModel):
     """
     CLAE (Causal Linear AutoEncoder)
-    - Stage 1: User-side Fractional IPW (beta) -> Variance Stabilization
+    - Stage 1: User-side Fractional IPW (alpha) -> Variance Stabilization
     - Stage 2: Item-side Geometric Ensemble Normalization (alpha) -> Causal Ensemble
     - Stage 3: Ridge Regression via Solve -> Faster and more stable
     """
@@ -326,7 +326,6 @@ class CLAE(BasicModel):
 
         self.reg_lambda = config.get('reg_lambda', 10.0) 
         self.alpha      = config.get('alpha', 0.5)
-        self.beta       = config.get('beta', 0.5)
         self.diag_const = config.get('diag_const', True)
         self.eps        = 1e-12
 
@@ -338,11 +337,11 @@ class CLAE(BasicModel):
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
 
         train_start = time()
-        print(f"Fitting CLAE (lambda={self.reg_lambda}, alpha={self.alpha}, beta={self.beta}, diag_const={self.diag_const}) on {self.device}...")
+        print(f"Fitting CLAE (lambda={self.reg_lambda}, alpha={self.alpha}, diag_const={self.diag_const}) on {self.device}...")
 
         # ── Stage 1: User-side Fractional IPW (CPU Sparse) ───────────────────────────
         n_u = np.asarray(X_sp.sum(axis=1)).ravel()
-        user_weights = np.power(n_u + self.eps, -self.beta)
+        user_weights = np.power(n_u + self.eps, -self.alpha)
         D_U_inv = sparse.diags(user_weights)
 
         X_weighted = D_U_inv @ X_sp                 
