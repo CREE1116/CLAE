@@ -8,9 +8,9 @@ cd /d "%~dp0"
 :: Grid Search Configuration
 :: ==========================================
 :: Models to run: CLAE, EASE, RLAE, GFCF, EASE_DAN, IPS_LAE
-set MODELS=CLAE EASE RLAE GFCF EASE_DAN IPS_LAE
+set MODELS=CLAE RLAE GFCF EASE_DAN IPS_LAE
 :: Datasets to run
-set DATASETS=ml-20m msd netflix yelp2018 gowalla amazon-book 
+set DATASETS=ml-20m netflix
 
 :: Common Settings
 set GPU_ID=0
@@ -29,7 +29,7 @@ for %%M in (%MODELS%) do (
         
         if "%%M"=="CLAE" (
             uv run python grid_search.py --model CLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_lambda_grid 1 100.0 5 log ^
+                --reg_lambda_grid 1.0 100.0 5 log ^
                 --alpha_grid 0.1 1.0 10 linear ^
                 --beta_grid 0.5 0.5 1 linear
         )
@@ -39,7 +39,7 @@ for %%M in (%MODELS%) do (
         )
         if "%%M"=="RLAE" (
             uv run python grid_search.py --model RLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_lambda_grid 1 100.0 5 log ^
+                --reg_lambda_grid 1.0 100.0 5 log ^
                 --xi_grid 0.0 1.0 5 linear
         )
         if "%%M"=="GFCF" (
@@ -48,9 +48,9 @@ for %%M in (%MODELS%) do (
         )
         if "%%M"=="EASE_DAN" (
             uv run python grid_search.py --model EASE_DAN --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_p_grid 1 100.0 5 log ^
-                --alpha_grid 0.0 1.0 3 linear ^
-                --beta_grid 0.0 1.0 3 linear
+                --reg_p_grid 1.0 100.0 5 log ^
+                --alpha_grid 0.1 0.9 3 linear ^
+                --beta_grid 0.1 0.9 3 linear
         )
         if "%%M"=="IPS_LAE" (
             :: IPS_LAE: logsigmoid mode

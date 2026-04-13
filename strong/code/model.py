@@ -327,6 +327,7 @@ class CLAE(BasicModel):
         self.reg_lambda = config.get('reg_lambda', 10.0) 
         self.alpha      = config.get('alpha', 0.5)
         self.beta       = config.get('beta', 0.5)
+        self.diag_const = config.get('diag_const', True)
         self.eps        = 1e-12
 
         self.__init_weight()
@@ -337,7 +338,7 @@ class CLAE(BasicModel):
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
 
         train_start = time()
-        print(f"Fitting CLAE (lambda={self.reg_lambda}, alpha={self.alpha}, beta={self.beta}) on {self.device}...")
+        print(f"Fitting CLAE (lambda={self.reg_lambda}, alpha={self.alpha}, beta={self.beta}, diag_const={self.diag_const}) on {self.device}...")
 
         # ── Stage 1: User-side Fractional IPW (CPU Sparse) ───────────────────────────
         n_u = np.asarray(X_sp.sum(axis=1)).ravel()
@@ -366,7 +367,12 @@ class CLAE(BasicModel):
             self.W = torch.linalg.solve(A_mat, G_torch)
 
         # Post-masking (Prevent self-recommendation)
-        # self.W.diagonal().zero_()
+        if self.diag_const:
+            # EASE diagonal constraint: B = W / (1 - diag(W))
+            diag_W = torch.diagonal(self.W)
+            self.W = self.W / (1.0 - diag_W + self.eps)
+        
+        self.W.diagonal().zero_()
 
         # Keep W on CPU for prediction to be consistent with other models if needed, 
         # but let's see if we can keep it on GPU. 
@@ -415,6 +421,7 @@ class DCLAE(BasicModel):
         self.alpha      = config.get('alpha', 0.5)
         self.beta       = config.get('beta', 0.5)
         self.dropout_p  = config.get('dropout_p', 0.3)
+        self.diag_const = config.get('diag_const', True)
         self.eps        = 1e-12
 
         self.__init_weight()
@@ -425,7 +432,7 @@ class DCLAE(BasicModel):
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
 
         train_start = time()
-        print(f"Fitting DCLAE (lambda={self.reg_lambda}, alpha={self.alpha}, beta={self.beta}, dropout={self.dropout_p}) on {self.device}...")
+        print(f"Fitting DCLAE (lambda={self.reg_lambda}, alpha={self.alpha}, beta={self.beta}, dropout={self.dropout_p}, diag_const={self.diag_const}) on {self.device}...")
 
         # ── Stage 1: User-side Fractional IPW (CPU Sparse) ───────────────────────────
         n_u = np.asarray(X_sp.sum(axis=1)).ravel()
@@ -460,6 +467,14 @@ class DCLAE(BasicModel):
             print("[Warning] Singular matrix, applying stronger regularization.")
             A_mat.diagonal().add_(self.reg_lambda * 10 + 1e-4)
             self.W = torch.linalg.solve(A_mat, G_torch)
+
+        # Post-masking (Prevent self-recommendation)
+        if self.diag_const:
+            # EASE diagonal constraint: B = W / (1 - diag(W))
+            diag_W = torch.diagonal(self.W)
+            self.W = self.W / (1.0 - diag_W + self.eps)
+        
+        self.W.diagonal().zero_()
 
         self.W = self.W.cpu().numpy()
 
