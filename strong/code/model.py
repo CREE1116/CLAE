@@ -502,7 +502,7 @@ class EASE_DAN(BasicModel):
         user_counts = np.array(X.sum(axis=1))
         X_T = X.multiply(np.power(user_counts, -self.beta)).T
         G = X_T.dot(X).toarray()
-        lmbda = self.reg_p + (self.config.get('drop_p', 0.5) / (1 - self.config.get('drop_p', 0.5))) * item_counts
+        lmbda = self.reg_p + (self.config.get('drop_p', 0.0) / (1 - self.config.get('drop_p', 0.0) + 1e-10)) * item_counts
         G[np.diag_indices(X.shape[1])] += lmbda.reshape(-1)
         
         P = np.linalg.inv(G)
