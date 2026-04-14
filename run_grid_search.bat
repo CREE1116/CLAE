@@ -57,13 +57,6 @@ for %%M in (%MODELS%) do (
             uv run python grid_search.py --model IPS_LAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
                 --reg_lambda_grid 0.1 1000.0 5 log ^
                 --wbeta_grid 0.1 1.0 5 linear ^
-                --wtype logsigmoid
-                
-            :: IPS_LAE: powerlaw mode
-            uv run python grid_search.py --model IPS_LAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_lambda_grid 0.1 1000.0 5 log ^
-                --wbeta_grid 0.1 1.0 5 linear ^
-                --wtype powerlaw
         )
         
         if !errorlevel! equ 0 (

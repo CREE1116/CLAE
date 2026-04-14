@@ -104,7 +104,7 @@ def main():
     parser.add_argument('--reg_p_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
                         default=[10, 1000, 5, 'log'], help='Grid for reg_p (EASE family)')
     parser.add_argument('--xi_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
-                        default=[0.0, 1.0, 5, 'linear'], help='Grid for xi (RLAE only)')
+                        default=[0.0, 0.9, 5, 'linear'], help='Grid for xi (RLAE only)')
     parser.add_argument('--wbeta_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
                         default=[0.1, 1.0, 5, 'linear'], help='Grid for wbeta (IPS_LAE only)')
     parser.add_argument('--wtype', type=str, default='logsigmoid', help='Fixed wtype for IPS_LAE')
@@ -119,14 +119,24 @@ def main():
     def process_grid_arg(arg_list):
         return generate_range(float(arg_list[0]), float(arg_list[1]), int(arg_list[2]), arg_list[3])
 
-    if args.model in ['CLAE', 'DCLAE', 'RLAE', 'RDLAE']:
+    if args.model == 'CLAE':
+        grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
+        grid['alpha'] = process_grid_arg(args.alpha_grid)
+    
+    elif args.model == 'DCLAE':
         grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
         grid['alpha'] = process_grid_arg(args.alpha_grid)
         grid['beta'] = process_grid_arg(args.beta_grid)
-        if args.model == 'DCLAE':
-            grid['dropout_p'] = process_grid_arg(args.dropout_grid)
-        if args.model in ['RLAE', 'RDLAE']:
-            grid['xi'] = process_grid_arg(args.xi_grid)
+        grid['dropout_p'] = process_grid_arg(args.dropout_grid)
+
+    elif args.model == 'RLAE':
+        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
+        grid['xi'] = process_grid_arg(args.xi_grid)
+    
+    elif args.model == 'RDLAE':
+        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
+        grid['drop_p'] = process_grid_arg(args.dropout_grid) # Using dropout_grid for drop_p
+        grid['xi'] = process_grid_arg(args.xi_grid)
     
     elif args.model == 'EASE':
         grid['reg_p'] = process_grid_arg(args.reg_p_grid)
