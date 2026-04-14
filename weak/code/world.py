@@ -28,8 +28,13 @@ seed = args.seed
 if GPU_NUM == -1:
     device = torch.device('cpu')
 else:
-    device = torch.device(f'cuda:{GPU_NUM}' if torch.cuda.is_available() else 'cpu')
-    torch.cuda.set_device(device) # change allocation of current GPU
+    if torch.cuda.is_available():
+        device = torch.device(f'cuda:{GPU_NUM}')
+        torch.cuda.set_device(device)
+    elif torch.backends.mps.is_available():
+        device = torch.device('mps')
+    else:
+        device = torch.device('cpu')
 
 dataset = args.dataset
 model_name = args.model
@@ -45,4 +50,5 @@ def cprint(words : str):
     print(f"\033[0;30;43m{words}\033[0m")
     
     
-print ('Current cuda device ', torch.cuda.current_device()) # check
+if torch.cuda.is_available():
+    print ('Current cuda device ', torch.cuda.current_device()) # check

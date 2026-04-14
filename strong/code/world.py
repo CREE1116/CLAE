@@ -58,4 +58,4 @@ def cprint(words : str):
     print(f"\033[0;30;43m{words}\033[0m")
 
 
-print ('Current cuda device ', torch.cuda.current_device()) # check
+if torch.cuda.is_available(): print ('Current cuda device ', torch.cuda.current_device()) # check
