@@ -18,6 +18,23 @@ class BasicModel(nn.Module):
     def getUsersRating(self, users):
         raise NotImplementedError
 
+    def _to_torch_sparse(self, scipy_matrix):
+        """Scipy CSR/CSC matrix를 Torch Sparse COO Tensor로 변환 (toarray 방지)"""
+        scipy_matrix = scipy_matrix.tocoo()
+        indices = torch.from_numpy(np.vstack((scipy_matrix.row, scipy_matrix.col)).astype(np.int64))
+        values = torch.from_numpy(scipy_matrix.data.astype(np.float32))
+        return torch.sparse_coo_tensor(indices, values, torch.Size(scipy_matrix.shape))
+
+    def _get_batch_ratings(self, users, test_matrix, W_gpu):
+        """Sparse-Dense 행렬곱을 활용한 효율적인 등급 계산"""
+        # 1. 필요한 사용자 행만 슬라이싱 (여전히 Scipy Sparse)
+        batch_sp = test_matrix[users.cpu().numpy()]
+        # 2. Torch Sparse로 변환하여 GPU로 전송
+        batch_torch = self._to_torch_sparse(batch_sp).to(W_gpu.device)
+        # 3. GPU에서 Sparse-Dense 행렬곱 수행
+        ratings = torch.sparse.mm(batch_torch, W_gpu)
+        return ratings.cpu()
+
 
 class GFCF(BasicModel):
     def __init__(self, config:dict, dataset:BasicDataset):
@@ -204,6 +221,9 @@ class EASE(BasicModel):
         self.num_users = dataset.n_users
         self.num_items = dataset.m_items
         
+        from world import device
+        self.device = device
+
         self.reg_p = config['reg_p']
         self.diag_const = config['diag_const']
         
@@ -216,15 +236,25 @@ class EASE(BasicModel):
         self.best_epoch = 0
 
         train_start = time()
-        G = np.array(X.T.dot(X).toarray())
-        G[np.diag_indices(self.num_items)] += self.reg_p
-        P = np.linalg.inv(G)
+        print(f"Fitting EASE on {self.device}...")
+        
+        # Gram Matrix 계산 (Scipy sparse 연산은 빠름)
+        G_sp = X.T @ X
+        # 결과를 바로 Torch GPU로 전송
+        G = torch.from_numpy(G_sp.toarray()).to(torch.float32).to(self.device)
+        
+        # Ridge Regularization
+        G.diagonal().add_(self.reg_p)
+        
+        # GPU에서 역행렬 계산
+        P = torch.linalg.inv(G)
 
         if self.diag_const:
-            self.W = P / (-np.diag(P))
+            self.W_gpu = P / (-torch.diagonal(P) + 1e-12)
         else:
-            self.W = P * -self.reg_p
-        self.W[np.diag_indices(self.num_items)] = 0
+            self.W_gpu = P * -self.reg_p
+            
+        self.W_gpu.diagonal().zero_()
 
         train_end = time()
         self.train_time = train_end - train_start
@@ -233,20 +263,10 @@ class EASE(BasicModel):
         self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
 
     def getUsersRating(self, users):
-        users = users.detach().cpu().numpy()
-
-        input_matrix = np.array(self.test_matrix[users].toarray())
-        eval_output = input_matrix @ self.W
-
-        return torch.FloatTensor(eval_output)
+        return self._get_batch_ratings(users, self.test_matrix, self.W_gpu)
 
     def getvalidUsersRating(self, users):
-        users = users.detach().cpu().numpy()
-
-        input_matrix = np.array(self.valid_matrix[users].toarray())
-        eval_output = input_matrix @ self.W
-
-        return torch.FloatTensor(eval_output)
+        return self._get_batch_ratings(users, self.valid_matrix, self.W_gpu)
 
 
 class EDLAE(BasicModel):
@@ -341,42 +361,36 @@ class CLAE(BasicModel):
 
         # ── Stage 1: User-side Fractional IPW (CPU Sparse) ───────────────────────────
         n_u = np.asarray(X_sp.sum(axis=1)).ravel()
-        user_weights = np.power(n_u + self.eps, -self.alpha)
+        user_weights = np.power(n_u + self.eps, -0.5)
         D_U_inv = sparse.diags(user_weights)
 
         X_weighted = D_U_inv @ X_sp                 
-        G_U = (X_sp.T @ X_weighted).toarray()       
+        G_U_sp = X_sp.T @ X_weighted                 
 
-        # ── Stage 2: Item-side Geometric Ensemble Normalization ──────────────────
-        A_i = G_U.diagonal().copy()
-        scale = np.power(A_i + self.eps, -self.alpha / 2.0)
-        G_tilde = G_U * scale[:, None] * scale[None, :]
+        # ── Stage 2: Item-side Geometric Ensemble Normalization (GPU) ──
+        G_torch = torch.from_numpy(G_U_sp.toarray()).to(torch.float32).to(self.device)
+        
+        A_i = torch.diagonal(G_torch).clone()
+        scale = torch.pow(A_i + self.eps, -self.alpha / 2.0)
+        G_tilde = G_torch * scale.view(-1, 1) * scale.view(1, -1)
 
         # ── Stage 3: Ridge Regression via Solve (GPU) ────────────────
         K = self.num_items
-        G_torch = torch.tensor(G_tilde, dtype=torch.float32, device=self.device)
-        A_mat = G_torch + self.reg_lambda * torch.eye(K, device=self.device)
+        A_mat = G_tilde + self.reg_lambda * torch.eye(K, device=self.device)
 
         try:
-            # W = (G_tilde + lambda*I)^{-1} @ G_tilde
-            self.W = torch.linalg.solve(A_mat, G_torch)
+            self.W_gpu = torch.linalg.solve(A_mat, G_tilde)
         except (torch._C._LinAlgError, RuntimeError):
             print("[Warning] Singular matrix, applying stronger regularization.")
             A_mat.diagonal().add_(self.reg_lambda * 10 + 1e-4)
-            self.W = torch.linalg.solve(A_mat, G_torch)
+            self.W_gpu = torch.linalg.solve(A_mat, G_tilde)
 
-        # Post-masking (Prevent self-recommendation)
+        # Post-masking
         if self.diag_const:
-            # EASE diagonal constraint: B = W / (1 - diag(W))
-            diag_W = torch.diagonal(self.W)
-            self.W = self.W / (1.0 - diag_W + self.eps)
+            diag_W = torch.diagonal(self.W_gpu)
+            self.W_gpu = self.W_gpu / (1.0 - diag_W + self.eps)
         
-        self.W.diagonal().zero_()
-
-        # Keep W on CPU for prediction to be consistent with other models if needed, 
-        # but let's see if we can keep it on GPU. 
-        # The other models use numpy for self.W. 
-        self.W = self.W.cpu().numpy()
+        self.W_gpu.diagonal().zero_()
 
         train_end = time()
         self.train_time = train_end - train_start
@@ -385,16 +399,10 @@ class CLAE(BasicModel):
         self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
 
     def getUsersRating(self, users):
-        users = users.detach().cpu().numpy()
-        input_matrix = np.array(self.test_matrix[users].toarray())
-        eval_output = input_matrix @ self.W
-        return torch.FloatTensor(eval_output)
+        return self._get_batch_ratings(users, self.test_matrix, self.W_gpu)
 
     def getvalidUsersRating(self, users):
-        users = users.detach().cpu().numpy()
-        input_matrix = np.array(self.valid_matrix[users].toarray())
-        eval_output = input_matrix @ self.W
-        return torch.FloatTensor(eval_output)
+        return self._get_batch_ratings(users, self.valid_matrix, self.W_gpu)
 
 
 class DCLAE(BasicModel):
