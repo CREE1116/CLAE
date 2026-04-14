@@ -41,8 +41,13 @@ CORES = multiprocessing.cpu_count() // 2
 if GPU_NUM == -1:
     device = torch.device('cpu')
 else:
-    device = torch.device(f'cuda:{GPU_NUM}' if torch.cuda.is_available() else 'cpu')
-    torch.cuda.set_device(device) # change allocation of current GPU
+    if torch.cuda.is_available():
+        device = torch.device(f'cuda:{GPU_NUM}')
+        torch.cuda.set_device(device)
+    elif torch.backends.mps.is_available():
+        device = torch.device('mps')
+    else:
+        device = torch.device('cpu')
 
 
 from warnings import simplefilter
