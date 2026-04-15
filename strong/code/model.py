@@ -361,7 +361,7 @@ class CLAE(BasicModel):
 
         # ── Stage 1: User-side Fractional IPW (CPU Sparse) ───────────────────────────
         n_u = np.asarray(X_sp.sum(axis=1)).ravel()
-        user_weights = np.power(n_u + self.eps, -0.5)
+        user_weights = np.power(n_u + self.eps, -self.alpha)
         D_U_inv = sparse.diags(user_weights)
 
         X_weighted = D_U_inv @ X_sp                 
@@ -376,20 +376,13 @@ class CLAE(BasicModel):
 
         # ── Stage 3: Ridge Regression via Solve (GPU) ────────────────
         K = self.num_items
-        A_mat = G_tilde + self.reg_lambda * torch.eye(K, device=self.device)
+        # ── Stage 3: Strict EASE closed-form ────────────────────────────────
+        G_tilde[torch.arange(K), torch.arange(K)] += self.reg_lambda
+        P = torch.linalg.inv(G_tilde)
 
-        try:
-            self.W_gpu = torch.linalg.solve(A_mat, G_tilde)
-        except (torch._C._LinAlgError, RuntimeError):
-            print("[Warning] Singular matrix, applying stronger regularization.")
-            A_mat.diagonal().add_(self.reg_lambda * 10 + 1e-4)
-            self.W_gpu = torch.linalg.solve(A_mat, G_tilde)
-
-        # Post-masking
-        if self.diag_const:
-            diag_W = torch.diagonal(self.W_gpu)
-            self.W_gpu = self.W_gpu / (1.0 - diag_W + self.eps)
-        
+        # W_ij = -P_ij / P_jj (i≠j), W_ii = 0
+        P_diag = torch.diagonal(P)  # (K,)
+        self.W_gpu = -P / (P_diag.unsqueeze(0) + self.eps)  # column-wise divide
         self.W_gpu.diagonal().zero_()
 
         train_end = time()
