@@ -156,16 +156,22 @@ def main():
         return generate_range(float(arg_list[0]), float(arg_list[1]), int(arg_list[2]), arg_list[3])
 
     # Model Groupings for Grids
-    if args.model in ['EASE', 'LAE', 'EDLAE']:
+    if args.model in ['EASE', 'LAE']:
         grid['reg_p'] = process_grid_arg(args.reg_p_grid)
+    
+    elif args.model == 'EDLAE':
+        grid['drop_p'] = process_grid_arg(args.dropout_grid)
     
     elif args.model == 'RLAE':
         grid['reg_p'] = process_grid_arg(args.reg_p_grid)
         grid['xi'] = process_grid_arg(args.xi_grid)
         
-    elif args.model in ['DLAE', 'RDLAE']:
-        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
+    elif args.model == 'DLAE':
         grid['dropout_p'] = process_grid_arg(args.dropout_grid)
+
+    elif args.model == 'RDLAE':
+        grid['drop_p'] = process_grid_arg(args.dropout_grid)
+        grid['xi'] = process_grid_arg(args.xi_grid)
 
     elif args.model in ['DAN_EASE', 'DAN_LAE', 'EASE_DAN']:
         grid['reg_p'] = process_grid_arg(args.reg_p_grid)
@@ -179,7 +185,6 @@ def main():
         grid['xi'] = process_grid_arg(args.xi_grid)
 
     elif args.model == 'DAN_DLAE':
-        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
         grid['alpha'] = process_grid_arg(args.alpha_grid)
         grid['beta'] = process_grid_arg(args.beta_grid)
         grid['dropout_p'] = process_grid_arg(args.dropout_grid)
@@ -194,7 +199,6 @@ def main():
         grid['xi'] = process_grid_arg(args.xi_grid)
 
     elif args.model in ['ASPIRE_DLAE', 'DCLAE']:
-        grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
         grid['alpha'] = process_grid_arg(args.alpha_grid)
         grid['dropout_p'] = process_grid_arg(args.dropout_grid)
 

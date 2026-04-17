@@ -98,8 +98,32 @@ class EASE(BasicModel):
     def getUsersRating(self, users):
         return self._get_batch_ratings(users, self.train_matrix, self.W_gpu)
 
-class LAE(EASE):
-    pass
+class LAE(BasicModel):
+    """Linear AutoEncoder: Ridge Regression without diagonal constraint"""
+    def __init__(self, config:dict, dataset:BasicDataset):
+        super(LAE, self).__init__()
+        self.dataset = dataset
+        from world import device
+        self.device = device
+        self.reg_p = config.get('reg_p', 100.0)
+        self.__init_weight()
+    
+    def __init_weight(self):
+        X = self.dataset.UserItemNet
+        self.train_matrix = X
+        train_start = time()
+        print(f"Fitting LAE on {self.device}...")
+        G_raw = (X.T @ X).toarray()
+        G = G_raw.copy()
+        G[np.diag_indices(G.shape[0])] += self.reg_p
+        P_inv = np.linalg.inv(G)
+        # W = (X.T X + lambda I)^-1 * X.T X
+        W = P_inv @ G_raw
+        self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
+        self.train_time = time() - train_start
+
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.train_matrix, self.W_gpu)
 
 class RLAE(BasicModel):
     def __init__(self, config:dict, dataset:BasicDataset):
@@ -130,12 +154,12 @@ class RLAE(BasicModel):
         return self._get_batch_ratings(users, self.train_matrix, self.W_gpu)
 
 class DLAE(BasicModel):
+    """Dropout LAE (Unconstrained)"""
     def __init__(self, config:dict, dataset:BasicDataset):
         super(DLAE, self).__init__()
         self.dataset = dataset
         from world import device
         self.device = device
-        self.reg_p = config.get('reg_p', 100.0)
         self.dropout_p = config.get('dropout_p', 0.3)
         self.__init_weight()
     
@@ -143,13 +167,17 @@ class DLAE(BasicModel):
         X = self.dataset.UserItemNet
         self.train_matrix = X
         train_start = time()
-        G = (X.T @ X).toarray()
+        print(f"Fitting DLAE on {self.device}...")
+        G_raw = (X.T @ X).toarray()
         p = min(self.dropout_p, 0.99)
-        w_dropout = (p / (1.0 - p)) * np.diag(G)
-        G[np.diag_indices(X.shape[1])] += self.reg_p + w_dropout
-        P = np.linalg.inv(G)
-        self.W_gpu = torch.tensor(P / (-np.diag(P) + 1e-12), dtype=torch.float32, device=self.device)
-        self.W_gpu.diagonal().zero_()
+        # Lambda = p/(1-p) * D_I
+        Lambda = (p / (1.0 - p)) * np.diag(G_raw)
+        G = G_raw.copy()
+        G[np.diag_indices(G.shape[0])] += Lambda
+        P_inv = np.linalg.inv(G)
+        # W = (X.T X + Lambda)^-1 * X.T X
+        W = P_inv @ G_raw
+        self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
         self.train_time = time() - train_start
 
     def getUsersRating(self, users):
@@ -188,8 +216,34 @@ class DAN_EASE(BasicModel):
     def getUsersRating(self, users):
         return self._get_batch_ratings(users, self.train_matrix, self.W_gpu)
 
-class DAN_LAE(DAN_EASE):
-    pass
+class DAN_LAE(BasicModel):
+    """DAN-LAE (Unconstrained)"""
+    def __init__(self, config:dict, dataset:BasicDataset):
+        super(DAN_LAE, self).__init__()
+        self.dataset = dataset
+        from world import device
+        self.device = device
+        self.reg_p = config.get('reg_p', 100.0)
+        self.alpha = config.get('alpha', 0.5)
+        self.beta = config.get('beta', 0.5)
+        self.__init_weight()
+    
+    def __init_weight(self):
+        X = self.dataset.UserItemNet
+        self.train_matrix = X
+        train_start = time()
+        print(f"Fitting DAN_LAE on {self.device}...")
+        P_dan_raw, _ = self._compute_dan_gram(X, self.alpha, self.beta)
+        G = P_dan_raw.copy()
+        G[np.diag_indices(G.shape[0])] += self.reg_p
+        P_inv = np.linalg.inv(G)
+        # W = (P_dan + lambda I)^-1 * P_dan
+        W = P_inv @ P_dan_raw
+        self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
+        self.train_time = time() - train_start
+
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.train_matrix, self.W_gpu)
 
 class DAN_RLAE(BasicModel):
     def __init__(self, config:dict, dataset:BasicDataset):
@@ -224,12 +278,12 @@ class DAN_RLAE(BasicModel):
         return self._get_batch_ratings(users, self.train_matrix, self.W_gpu)
 
 class DAN_DLAE(BasicModel):
+    """DAN-DLAE (Unconstrained, Removed reg_p)"""
     def __init__(self, config:dict, dataset:BasicDataset):
         super(DAN_DLAE, self).__init__()
         self.dataset = dataset
         from world import device
         self.device = device
-        self.reg_p = config.get('reg_p', 100.0)
         self.alpha = config.get('alpha', 0.5)
         self.beta = config.get('beta', 0.5)
         self.dropout_p = config.get('dropout_p', 0.3)
@@ -239,15 +293,15 @@ class DAN_DLAE(BasicModel):
         X = self.dataset.UserItemNet
         self.train_matrix = X
         train_start = time()
-        G, n_i = self._compute_dan_gram(X, self.alpha, self.beta)
+        print(f"Fitting DAN_DLAE on {self.device}...")
+        P_dan_raw, _ = self._compute_dan_gram(X, self.alpha, self.beta)
         p = min(self.dropout_p, 0.99)
-        w_dropout = (p / (1.0 - p)) * np.diag(G)
-        G[np.diag_indices(X.shape[1])] += self.reg_p + w_dropout
-        P = np.linalg.inv(G)
-        W = -P / (np.diag(P) + 1e-12)
-        item_power_term = np.power(n_i + 1e-12, -(1 - self.alpha))
-        W = W * (1.0/(item_power_term + 1e-12)).reshape(-1, 1) * item_power_term
-        np.fill_diagonal(W, 0)
+        w_dropout = (p / (1.0 - p)) * np.diag(P_dan_raw)
+        G = P_dan_raw.copy()
+        G[np.diag_indices(G.shape[0])] += w_dropout
+        P_inv = np.linalg.inv(G)
+        # W = (P_dan + Lambda)^-1 * P_dan
+        W = P_inv @ P_dan_raw
         self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
         self.train_time = time() - train_start
 
@@ -285,8 +339,33 @@ class ASPIRE_EASE(BasicModel):
     def getUsersRating(self, users):
         return self._get_batch_ratings(users, self.train_matrix, self.W_gpu)
 
-class ASPIRE_LAE(ASPIRE_EASE):
-    pass
+class ASPIRE_LAE(BasicModel):
+    """ASPIRE-LAE (Unconstrained)"""
+    def __init__(self, config:dict, dataset:BasicDataset):
+        super(ASPIRE_LAE, self).__init__()
+        self.dataset = dataset
+        from world import device
+        self.device = device
+        self.reg_lambda = config.get('reg_lambda', 10.0) 
+        self.alpha      = config.get('alpha', 0.5)
+        self.__init_weight()
+
+    def __init_weight(self):
+        X_sp = self.dataset.UserItemNet
+        self.train_matrix = X_sp
+        train_start = time()
+        print(f"Fitting ASPIRE_LAE on {self.device}...")
+        G_aspire, _ = self._compute_aspire_gram(X_sp, self.alpha)
+        G = G_aspire.copy()
+        G[np.diag_indices_from(G)] += self.reg_lambda
+        P_inv = np.linalg.inv(G)
+        # W = (G_aspire + lambda I)^-1 * G_aspire
+        W = P_inv @ G_aspire
+        self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
+        self.train_time = time() - train_start
+
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.train_matrix, self.W_gpu)
 
 class ASPIRE_RLAE(BasicModel):
     def __init__(self, config:dict, dataset:BasicDataset):
@@ -318,12 +397,12 @@ class ASPIRE_RLAE(BasicModel):
         return self._get_batch_ratings(users, self.train_matrix, self.W_gpu)
 
 class ASPIRE_DLAE(BasicModel):
+    """ASPIRE-DLAE (Unconstrained, Removed reg_lambda)"""
     def __init__(self, config:dict, dataset:BasicDataset):
         super(ASPIRE_DLAE, self).__init__()
         self.dataset = dataset
         from world import device
         self.device = device
-        self.reg_lambda = config.get('reg_lambda', 10.0) 
         self.alpha      = config.get('alpha', 0.5)
         self.dropout_p  = config.get('dropout_p', 0.3)
         self.__init_weight()
@@ -332,15 +411,16 @@ class ASPIRE_DLAE(BasicModel):
         X_sp = self.dataset.UserItemNet
         self.train_matrix = X_sp
         train_start = time()
-        G, _ = self._compute_aspire_gram(X_sp, self.alpha)
+        print(f"Fitting ASPIRE_DLAE on {self.device}...")
+        G_aspire, _ = self._compute_aspire_gram(X_sp, self.alpha)
         p = min(self.dropout_p, 0.99)
-        w_dropout = (p / (1.0 - p)) * np.diag(G)
-        G[np.diag_indices_from(G)] += self.reg_lambda + w_dropout
-        P = np.linalg.inv(G)
-        diag_P = np.diag(P)
-        P /= -(diag_P + 1e-12)
-        np.fill_diagonal(P, 0)
-        self.W_gpu = torch.tensor(P, dtype=torch.float32, device=self.device)
+        w_dropout = (p / (1.0 - p)) * np.diag(G_aspire)
+        G = G_aspire.copy()
+        G[np.diag_indices_from(G)] += w_dropout
+        P_inv = np.linalg.inv(G)
+        # W = (G_aspire + Lambda)^-1 * G_aspire
+        W = P_inv @ G_aspire
+        self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
         self.train_time = time() - train_start
 
     def getUsersRating(self, users):
@@ -348,13 +428,13 @@ class ASPIRE_DLAE(BasicModel):
 
 
 class RDLAE(BasicModel):
+    """RDLAE: Lagrangian Dropout LAE (Removed reg_p)"""
     def __init__(self, config:dict, dataset:BasicDataset):
         super(RDLAE, self).__init__()
         self.dataset : dataloader.BasicDataset = dataset
         self.config = config
         self.num_users = dataset.n_users
         self.num_items = dataset.m_items
-        self.reg_p = config['reg_p']
         self.drop_p = config['drop_p']
         self.xi = config['xi']
         self.__init_weight()
@@ -364,7 +444,8 @@ class RDLAE(BasicModel):
         self.train_matrix = X
         train_start = time()
         G = np.array(X.T.dot(X).toarray())
-        gamma = np.diag(G) * self.drop_p / (1 - self.drop_p) + self.reg_p
+        # gamma = p/(1-p) * D_I (Removed reg_p)
+        gamma = np.diag(G) * self.drop_p / (1 - self.drop_p)
         G[np.diag_indices(self.num_items)] += gamma
         C = np.linalg.inv(G)
         diag_C = np.diag(C)
@@ -383,13 +464,13 @@ class RDLAE(BasicModel):
 
 
 class EDLAE(BasicModel):
+    """EDLAE: EASE-style Dropout LAE (Removed reg_p)"""
     def __init__(self, config:dict, dataset:BasicDataset):
         super(EDLAE, self).__init__()
         self.dataset : dataloader.BasicDataset = dataset
         self.config = config
         self.num_users = dataset.n_users
         self.num_items = dataset.m_items
-        self.reg_p = config['reg_p']
         self.drop_p = config['drop_p']
         self.diag_const = config.get('diag_const', True)
         self.__init_weight()
@@ -399,7 +480,8 @@ class EDLAE(BasicModel):
         self.train_matrix = X
         train_start = time()
         G = np.array(X.T.dot(X).toarray())
-        gamma = np.diag(G) * self.drop_p / (1 - self.drop_p) + self.reg_p
+        # gamma = p/(1-p) * D_I (Removed reg_p)
+        gamma = np.diag(G) * self.drop_p / (1 - self.drop_p)
         G[np.diag_indices(self.num_items)] += gamma
         C = np.linalg.inv(G)
         if self.diag_const:

@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # ==========================================
-# Grid Search Configuration
+# Grid Search Configuration (Balanced Budget ~100 trials/model)
 # ==========================================
 # MODELS=("EASE" "RLAE" "DLAE" "LAE" "DAN_EASE" "DAN_RLAE" "DAN_DLAE" "DAN_LAE" "ASPIRE_RLAE" "ASPIRE_EASE" "ASPIRE_DLAE" "ASPIRE_LAE")
-MODELS=("ASPIRE_LAE" "ASPIRE_DLAE" "ASPIRE_RLAE" "ASPIRE_EASE")
+MODELS=("DLAE" "LAE")
 # Datasets to run
 DATASETS=("steam")
 
@@ -13,7 +13,7 @@ GPU_ID=0
 MODE="strong"
 
 echo "=========================================="
-echo "Starting Comprehensive Grid Search"
+echo "Starting Balanced Grid Search (Budget Control)"
 echo "Models: ${MODELS[*]}"
 echo "Datasets: ${DATASETS[*]}"
 echo "=========================================="
@@ -25,64 +25,61 @@ for M in "${MODELS[@]}"; do
         
         case $M in
             "EASE"|"LAE")
-                # EASE/LAE: 10 ~ 10000
+                # 1 param: 20 trials
                 uv run python grid_search.py --model "$M" --dataset "$D" --gpu $GPU_ID --mode "$MODE" \
-                    --reg_p_grid 10.0 10000.0 10 log
+                    --reg_p_grid 10.0 10000.0 20 log
                 ;;
             "RLAE")
-                # RLAE: 10 ~ 1000
+                # 2 params: 10 x 10 = 100 trials
                 uv run python grid_search.py --model "$M" --dataset "$D" --gpu $GPU_ID --mode "$MODE" \
-                    --reg_p_grid 10.0 1000.0 7 log \
-                    --xi_grid 0.0 1.0 11 linear
+                    --reg_p_grid 10.0 1000.0 10 log \
+                    --xi_grid 0.0 1.0 10 linear
                 ;;
             "DLAE")
-                # DLAE: 10 ~ 1000
+                # 1 param: 20 trials
                 uv run python grid_search.py --model "$M" --dataset "$D" --gpu $GPU_ID --mode "$MODE" \
-                    --reg_p_grid 10.0 1000.0 7 log \
-                    --dropout_grid 0.1 0.9 9 linear
+                    --dropout_grid 0.1 0.9 10 linear
                 ;;
             "DAN_EASE"|"DAN_LAE")
-                # DAN: 0.01 ~ 100
+                # 3 params: 5 x 4 x 5 = 100 trials
                 uv run python grid_search.py --model "$M" --dataset "$D" --gpu $GPU_ID --mode "$MODE" \
-                    --reg_p_grid 0.01 100.0 9 log \
-                    --alpha_grid 0.0 0.5 6 linear \
-                    --beta_grid 0.0 1.0 11 linear
+                    --reg_p_grid 0.01 100.0 5 log \
+                    --alpha_grid 0.0 0.5 4 linear \
+                    --beta_grid 0.0 1.0 5 linear
                 ;;
             "DAN_RLAE")
-                # DAN: 0.01 ~ 100
+                # 4 params: 4 x 3 x 3 x 3 = 108 trials
                 uv run python grid_search.py --model "$M" --dataset "$D" --gpu $GPU_ID --mode "$MODE" \
-                    --reg_p_grid 0.01 100.0 7 log \
+                    --reg_p_grid 0.01 100.0 4 log \
                     --alpha_grid 0.0 0.5 3 linear \
-                    --beta_grid 0.0 1.0 6 linear \
-                    --xi_grid 0.0 1.0 6 linear
+                    --beta_grid 0.0 1.0 3 linear \
+                    --xi_grid 0.0 1.0 3 linear
                 ;;
             "DAN_DLAE")
-                # DAN: 0.01 ~ 100
+                # 3 params: 4 x 5 x 5 = 100 trials
                 uv run python grid_search.py --model "$M" --dataset "$D" --gpu $GPU_ID --mode "$MODE" \
-                    --reg_p_grid 0.01 100.0 7 log \
-                    --alpha_grid 0.0 0.5 3 linear \
-                    --beta_grid 0.0 1.0 6 linear \
+                    --alpha_grid 0.0 0.5 4 linear \
+                    --beta_grid 0.0 1.0 5 linear \
                     --dropout_grid 0.1 0.9 5 linear
                 ;;
             "ASPIRE_EASE"|"ASPIRE_LAE")
-                # ASPIRE: 0.01 ~ 100
+                # 2 params: 10 x 10 = 100 trials
                 uv run python grid_search.py --model "$M" --dataset "$D" --gpu $GPU_ID --mode "$MODE" \
-                    --reg_lambda_grid 0.01 100.0 9 log \
-                    --alpha_grid 0.0 1.0 11 linear
+                    --reg_lambda_grid 0.01 100.0 10 log \
+                    --alpha_grid 0.1 1.0 10 linear
                 ;;
             "ASPIRE_RLAE")
-                # ASPIRE: 0.01 ~ 100
+                # 3 params: 5 x 4 x 5 = 100 trials
                 uv run python grid_search.py --model "$M" --dataset "$D" --gpu $GPU_ID --mode "$MODE" \
-                    --reg_lambda_grid 0.01 100.0 7 log \
-                    --alpha_grid 0.0 1.0 6 linear \
-                    --xi_grid 0.0 1.0 6 linear
+                    --reg_lambda_grid 0.01 100.0 5 log \
+                    --alpha_grid 0.0 1.0 4 linear \
+                    --xi_grid 0.0 1.0 5 linear
                 ;;
             "ASPIRE_DLAE")
-                # ASPIRE: 0.01 ~ 100
+                # 2 params: 10 x 9 = 90 trials
                 uv run python grid_search.py --model "$M" --dataset "$D" --gpu $GPU_ID --mode "$MODE" \
-                    --reg_lambda_grid 0.01 100.0 7 log \
-                    --alpha_grid 0.0 1.0 6 linear \
-                    --dropout_grid 0.1 0.9 5 linear
+                    --alpha_grid 0.1 1.0 10 linear \
+                    --dropout_grid 0.1 0.9 9 linear
                 ;;
         esac
         

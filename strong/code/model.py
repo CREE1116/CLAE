@@ -56,14 +56,19 @@ class BasicModel(nn.Module):
     def _compute_dan_gram(self, X_sp, alpha, beta, eps=1e-12):
         """DAN (Degree-Aware Normalization) 가중치가 적용된 Gram Matrix 계산 (CPU)"""
         print(f"  computing DAN Gram Matrix (alpha={alpha}, beta={beta})...")
+        # 1. User Degree Weighting: D_U^-beta
         n_u = np.asarray(X_sp.sum(axis=1)).ravel().astype(np.float32)
         u_weights = np.power(n_u + eps, -beta).astype(np.float32)
-        
-        n_i = np.asarray(X_sp.sum(axis=0)).ravel().astype(np.float32)
         X_weighted = sparse.diags(u_weights) @ X_sp
-        G = (X_sp.T @ X_weighted).toarray()
+        G_raw = (X_sp.T @ X_weighted).toarray()
+        
+        # 2. Item Degree Scaling: D_I^{-(1-alpha)} * G_raw * D_I^-alpha
+        n_i = np.asarray(X_sp.sum(axis=0)).ravel().astype(np.float32)
+        d_left = np.power(n_i + eps, -(1.0 - alpha))
+        d_right = np.power(n_i + eps, -alpha)
+        G = d_left[:, None] * G_raw * d_right[None, :]
+        
         return G, n_i
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Base Models
@@ -85,12 +90,13 @@ class LAE(BasicModel):
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
         train_start = time()
         print(f"Fitting LAE on {self.device}...")
-        G_sp = X.T @ X
-        G = G_sp.toarray()
+        G_raw = (X.T @ X).toarray()
+        G = G_raw.copy()
         G[np.diag_indices(G.shape[0])] += self.reg_p
-        P = np.linalg.inv(G)
-        # Unconstrained: W = I - lambda * P. For ranking, W = -P is equivalent.
-        self.W_gpu = torch.tensor(P * -self.reg_p, dtype=torch.float32, device=self.device)
+        P_inv = np.linalg.inv(G)
+        # W = (X.T X + lambda I)^-1 * X.T X
+        W = P_inv @ G_raw
+        self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
         self.train_time = time() - train_start
         self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
 
@@ -172,13 +178,12 @@ class RLAE(BasicModel):
 
 
 class DLAE(BasicModel):
-    """Dropout LAE: Unconstrained Ridge with Dropout"""
+    """Dropout LAE: (X.T X + Lambda)^-1 * X.T X where Lambda = p/(1-p) * D_I"""
     def __init__(self, config:dict, dataset:BasicDataset):
         super(DLAE, self).__init__()
         self.dataset = dataset
         from world import device
         self.device = device
-        self.reg_p = config.get('reg_p', 100.0)
         self.dropout_p = config.get('dropout_p', 0.3)
         self.__init_weight()
     
@@ -187,13 +192,23 @@ class DLAE(BasicModel):
         self.valid_matrix = self.dataset.validUserItemNet.tocsr()
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
         train_start = time()
-        G = (X.T @ X).toarray()
+        print(f"Fitting DLAE on {self.device}...")
+        
+        G_raw = (X.T @ X).toarray()
+        n_i = np.asarray(X.sum(axis=0)).ravel().astype(np.float32)
+        
         p = min(self.dropout_p, 0.99)
-        w_dropout = (p / (1.0 - p)) * np.diag(G)
-        G[np.diag_indices(X.shape[1])] += self.reg_p + w_dropout
-        P = np.linalg.inv(G)
-        # Unconstrained scaling
-        self.W_gpu = torch.tensor(P * -self.reg_p, dtype=torch.float32, device=self.device)
+        # Lambda = p/(1-p) * D_I
+        Lambda = (p / (1.0 - p)) * n_i
+        
+        G = G_raw.copy()
+        G[np.diag_indices(G.shape[0])] += Lambda
+        P_inv = np.linalg.inv(G)
+        
+        # W = (X.T X + Lambda)^-1 * X.T X
+        W = P_inv @ G_raw
+        
+        self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
         self.train_time = time() - train_start
         self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
 
@@ -209,7 +224,7 @@ class DLAE(BasicModel):
 # ──────────────────────────────────────────────────────────────────────────────
 
 class DAN_LAE(BasicModel):
-    """DAN-LAE: Unconstrained DAN"""
+    """DAN-LAE: (P_dan + lambda I)^-1 * P_dan"""
     def __init__(self, config:dict, dataset:BasicDataset):
         super(DAN_LAE, self).__init__()
         self.dataset = dataset
@@ -225,12 +240,17 @@ class DAN_LAE(BasicModel):
         self.valid_matrix = self.dataset.validUserItemNet.tocsr()
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
         train_start = time()
-        G, n_i = self._compute_dan_gram(X, self.alpha, self.beta)
-        G[np.diag_indices(X.shape[1])] += self.reg_p
-        P = np.linalg.inv(G)
-        W = P * -self.reg_p
-        item_power_term = np.power(n_i + 1e-12, -(1 - self.alpha))
-        W = W * (1.0/(item_power_term + 1e-12)).reshape(-1, 1) * item_power_term
+        print(f"Fitting DAN_LAE on {self.device}...")
+        
+        P_dan_raw, _ = self._compute_dan_gram(X, self.alpha, self.beta)
+        
+        G = P_dan_raw.copy()
+        G[np.diag_indices(G.shape[0])] += self.reg_p
+        P_inv = np.linalg.inv(G)
+        
+        # W = (P_dan + lambda I)^-1 * P_dan
+        W = P_inv @ P_dan_raw
+        
         self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
         self.train_time = time() - train_start
         self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
@@ -243,7 +263,7 @@ class DAN_LAE(BasicModel):
 
 
 class DAN_EASE(BasicModel):
-    """DAN-EASE: Constrained DAN"""
+    """DAN-EASE: Constrained DAN (diag=0)"""
     def __init__(self, config:dict, dataset:BasicDataset):
         super(DAN_EASE, self).__init__()
         self.dataset = dataset
@@ -259,14 +279,16 @@ class DAN_EASE(BasicModel):
         self.valid_matrix = self.dataset.validUserItemNet.tocsr()
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
         train_start = time()
-        G, n_i = self._compute_dan_gram(X, self.alpha, self.beta)
-        G[np.diag_indices(X.shape[1])] += self.reg_p
+        print(f"Fitting DAN_EASE on {self.device}...")
+        
+        P_dan, _ = self._compute_dan_gram(X, self.alpha, self.beta)
+        G = P_dan.copy()
+        G[np.diag_indices(G.shape[0])] += self.reg_p
         P = np.linalg.inv(G)
         diag_P = np.diag(P)
         W = -P / (diag_P + 1e-12)
-        item_power_term = np.power(n_i + 1e-12, -(1 - self.alpha))
-        W = W * (1.0/(item_power_term + 1e-12)).reshape(-1, 1) * item_power_term
         np.fill_diagonal(W, 0)
+        
         self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
         self.train_time = time() - train_start
         self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
@@ -295,16 +317,18 @@ class DAN_RLAE(BasicModel):
         self.valid_matrix = self.dataset.validUserItemNet.tocsr()
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
         train_start = time()
-        G, n_i = self._compute_dan_gram(X, self.alpha, self.beta)
-        G[np.diag_indices(X.shape[1])] += self.reg_p
+        print(f"Fitting DAN_RLAE on {self.device}...")
+        
+        P_dan, _ = self._compute_dan_gram(X, self.alpha, self.beta)
+        G = P_dan.copy()
+        G[np.diag_indices(G.shape[0])] += self.reg_p
         P = np.linalg.inv(G)
         diag_P = np.diag(P)
         condition = (1 - self.reg_p * diag_P) > self.xi
         lagrangian = ((1 - self.xi) / (diag_P + 1e-12) - self.reg_p) * condition.astype(float)
         W = P * -(lagrangian + self.reg_p)
-        item_power_term = np.power(n_i + 1e-12, -(1 - self.alpha))
-        W = W * (1.0/(item_power_term + 1e-12)).reshape(-1, 1) * item_power_term
         np.fill_diagonal(W, 0)
+        
         self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
         self.train_time = time() - train_start
         self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
@@ -317,13 +341,12 @@ class DAN_RLAE(BasicModel):
 
 
 class DAN_DLAE(BasicModel):
-    """DAN-DLAE: Unconstrained DAN with Dropout"""
+    """DAN-DLAE: Combined DAN and Dropout Penalty (Unconstrained)"""
     def __init__(self, config:dict, dataset:BasicDataset):
         super(DAN_DLAE, self).__init__()
         self.dataset = dataset
         from world import device
         self.device = device
-        self.reg_p = config.get('reg_p', 100.0)
         self.alpha = config.get('alpha', 0.5)
         self.beta = config.get('beta', 0.5)
         self.dropout_p = config.get('dropout_p', 0.3)
@@ -334,14 +357,21 @@ class DAN_DLAE(BasicModel):
         self.valid_matrix = self.dataset.validUserItemNet.tocsr()
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
         train_start = time()
-        G, n_i = self._compute_dan_gram(X, self.alpha, self.beta)
+        print(f"Fitting DAN_DLAE on {self.device}...")
+        
+        P_dan_raw, n_i = self._compute_dan_gram(X, self.alpha, self.beta)
+        
         p = min(self.dropout_p, 0.99)
-        w_dropout = (p / (1.0 - p)) * np.diag(G)
-        G[np.diag_indices(X.shape[1])] += self.reg_p + w_dropout
-        P = np.linalg.inv(G)
-        W = P * -self.reg_p
-        item_power_term = np.power(n_i + 1e-12, -(1 - self.alpha))
-        W = W * (1.0/(item_power_term + 1e-12)).reshape(-1, 1) * item_power_term
+        # Lambda = p/(1-p) * diag(P_dan)
+        w_dropout = (p / (1.0 - p)) * np.diag(P_dan_raw)
+        
+        G = P_dan_raw.copy()
+        G[np.diag_indices(G.shape[0])] += w_dropout
+        P_inv = np.linalg.inv(G)
+        
+        # W = (P_dan + Lambda)^-1 * P_dan
+        W = P_inv @ P_dan_raw
+        
         self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
         self.train_time = time() - train_start
         self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
@@ -376,7 +406,9 @@ class ASPIRE_LAE(BasicModel):
         G, _ = self._compute_aspire_gram(X_sp, self.alpha)
         G[np.diag_indices_from(G)] += self.reg_lambda
         P = np.linalg.inv(G)
-        self.W_gpu = torch.tensor(P * -self.reg_lambda, dtype=torch.float32, device=self.device)
+        # W = (G + lambda I)^-1 * G
+        W = P @ G
+        self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
         self.train_time = time() - train_start
         self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
 
@@ -456,13 +488,12 @@ class ASPIRE_RLAE(BasicModel):
 
 
 class ASPIRE_DLAE(BasicModel):
-    """ASPIRE-DLAE: Unconstrained ASPIRE with Dropout"""
+    """ASPIRE-DLAE: Unconstrained ASPIRE with Dropout Penalty"""
     def __init__(self, config:dict, dataset:BasicDataset):
         super(ASPIRE_DLAE, self).__init__()
         self.dataset = dataset
         from world import device
         self.device = device
-        self.reg_lambda = config.get('reg_lambda', 10.0) 
         self.alpha      = config.get('alpha', 0.5)
         self.dropout_p  = config.get('dropout_p', 0.3)
         self.__init_weight()
@@ -472,12 +503,22 @@ class ASPIRE_DLAE(BasicModel):
         self.valid_matrix = self.dataset.validUserItemNet.tocsr()
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
         train_start = time()
-        G, _ = self._compute_aspire_gram(X_sp, self.alpha)
+        print(f"Fitting ASPIRE_DLAE on {self.device}...")
+        
+        G_aspire, _ = self._compute_aspire_gram(X_sp, self.alpha)
+        
         p = min(self.dropout_p, 0.99)
-        w_dropout = (p / (1.0 - p)) * np.diag(G)
-        G[np.diag_indices_from(G)] += self.reg_lambda + w_dropout
-        P = np.linalg.inv(G)
-        self.W_gpu = torch.tensor(P * -self.reg_lambda, dtype=torch.float32, device=self.device)
+        # Lambda = p/(1-p) * diag(G_aspire)
+        w_dropout = (p / (1.0 - p)) * np.diag(G_aspire)
+        
+        G = G_aspire.copy()
+        G[np.diag_indices_from(G)] += w_dropout
+        P_inv = np.linalg.inv(G)
+        
+        # W = (G_aspire + Lambda)^-1 * G_aspire
+        W = P_inv @ G_aspire
+        
+        self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
         self.train_time = time() - train_start
         self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
 
@@ -500,53 +541,48 @@ class GFCF(BasicModel):
         self.__init_weight()
     
     def __init_weight(self):
-        self.valid_matrix = self.dataset.validUserItemNet
-        self.test_matrix = self.dataset.testUserItemNet
-        adj_mat = self.dataset.UserItemNet.tolil()
+        X_sp = self.dataset.UserItemNet
+        self.valid_matrix = self.dataset.validUserItemNet.tocsr()
+        self.test_matrix = self.dataset.testUserItemNet.tocsr()
         train_start = time()
-        rowsum = np.array(adj_mat.sum(axis=1))
-        d_inv = np.power(rowsum, -0.5).flatten()
-        d_inv[np.isinf(d_inv)] = 0.
-        d_mat = sparse.diags(d_inv)
-        norm_adj = d_mat.dot(adj_mat)
-        colsum = np.array(adj_mat.sum(axis=0))
-        d_inv = np.power(colsum, -0.5).flatten()
-        d_inv[np.isinf(d_inv)] = 0.
-        d_mat = sparse.diags(d_inv)
-        self.d_mat_i = d_mat
-        self.d_mat_i_inv = sparse.diags(1/d_inv)
-        norm_adj = norm_adj.dot(d_mat)
-        self.norm_adj = norm_adj.tocsc()
+        
+        # Simple GFCF implementation (SVD on Normalized Adj)
         import scipy.sparse.linalg as linalg
-        _, _, self.vt = linalg.svds(norm_adj, 256)
+        
+        rowsum = np.array(X_sp.sum(axis=1)).ravel()
+        d_inv = np.power(rowsum + 1e-12, -0.5)
+        D_u = sparse.diags(d_inv)
+        
+        colsum = np.array(X_sp.sum(axis=0)).ravel()
+        d_inv_i = np.power(colsum + 1e-12, -0.5)
+        D_i = sparse.diags(d_inv_i)
+        
+        A_norm = D_u @ X_sp @ D_i
+        U, S, Vt = linalg.svds(A_norm.tocsc(), k=256)
+        
+        self.W = (D_i @ Vt.T @ Vt @ sparse.diags(1.0/(d_inv_i + 1e-12))).toarray()
+        self.W_gpu = torch.tensor(self.W, dtype=torch.float32, device=self.device)
+        
         self.train_time = time() - train_start
         self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
-        
-    def getUsersRating(self, users):
-        users = users.detach().cpu().numpy()
-        norm_adj = self.norm_adj
-        batch_users = np.array(self.test_matrix[users,:].toarray())
-        ret = batch_users @ (norm_adj.T @ norm_adj + self.alpha * self.d_mat_i @ self.vt.T @ self.vt @ self.d_mat_i_inv)
-        return torch.FloatTensor(ret)
-    
-    def getvalidUsersRating(self, users):
-        users = users.detach().cpu().numpy()
-        norm_adj = self.norm_adj
-        batch_users = np.array(self.valid_matrix[users,:].toarray())
-        ret = batch_users @ (norm_adj.T @ norm_adj + self.alpha * self.d_mat_i @ self.vt.T @ self.vt @ self.d_mat_i_inv)
-        return torch.FloatTensor(ret)
 
-class EASE_DAN(DAN_EASE): # For backward compatibility
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.test_matrix, self.W_gpu)
+
+    def getvalidUsersRating(self, users):
+        return self._get_batch_ratings(users, self.valid_matrix, self.W_gpu)
+
+class EASE_DAN(DAN_EASE): 
     pass
 
 class RDLAE(BasicModel):
+    """RDLAE: Lagrangian Dropout LAE (Removed reg_p)"""
     def __init__(self, config:dict, dataset:BasicDataset):
         super(RDLAE, self).__init__()
         self.dataset : dataloader.BasicDataset = dataset
         self.config = config
         self.num_users = dataset.n_users
         self.num_items = dataset.m_items
-        self.reg_p = config['reg_p']
         self.drop_p = config['drop_p']
         self.xi = config['xi']
         self.__init_weight()
@@ -555,7 +591,8 @@ class RDLAE(BasicModel):
         X = self.dataset.UserItemNet
         train_start = time()
         G = np.array(X.T.dot(X).toarray())
-        gamma = np.diag(G) * self.drop_p / (1 - self.drop_p) + self.reg_p
+        # gamma = p/(1-p) * D_I (Removed reg_p)
+        gamma = np.diag(G) * self.drop_p / (1 - self.drop_p)
         G[np.diag_indices(self.num_items)] += gamma
         C = np.linalg.inv(G)
         diag_C = np.diag(C)
@@ -581,13 +618,13 @@ class RDLAE(BasicModel):
         return torch.FloatTensor(eval_output)
 
 class EDLAE(BasicModel):
+    """EDLAE: EASE-style Dropout LAE (Removed reg_p)"""
     def __init__(self, config:dict, dataset:BasicDataset):
         super(EDLAE, self).__init__()
         self.dataset : dataloader.BasicDataset = dataset
         self.config = config
         self.num_users = dataset.n_users
         self.num_items = dataset.m_items
-        self.reg_p = config['reg_p']
         self.drop_p = config['drop_p']
         self.__init_weight()
     
@@ -595,7 +632,8 @@ class EDLAE(BasicModel):
         X = self.dataset.UserItemNet
         train_start = time()
         G = np.array(X.T.dot(X).toarray())
-        gamma = np.diag(G) * self.drop_p / (1 - self.drop_p) + self.reg_p
+        # gamma = p/(1-p) * D_I (Removed reg_p)
+        gamma = np.diag(G) * self.drop_p / (1 - self.drop_p)
         G[np.diag_indices(self.num_items)] += gamma
         C = np.linalg.inv(G)
         self.W = C / (-np.diag(C) + 1e-12)
