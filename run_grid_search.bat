@@ -7,10 +7,10 @@ cd /d "%~dp0"
 :: ==========================================
 :: Grid Search Configuration
 :: ==========================================
-:: Models to run: CLAE, EASE, RLAE, GFCF, EASE_DAN, IPS_LAE
-set MODELS=CLAE RLAE GFCF EASE_DAN IPS_LAE
+:: set MODELS=EASE RLAE DLAE LAE DAN_EASE DAN_RLAE DAN_DLAE DAN_LAE ASPIRE_RLAE ASPIRE_EASE ASPIRE_DLAE ASPIRE_LAE
+set MODELS=ASPIRE_LAE ASPIRE_DLAE ASPIRE_RLAE ASPIRE_EASE
 :: Datasets to run
-set DATASETS=ml-20m netflix
+set DATASETS=steam
 
 :: Common Settings
 set GPU_ID=0
@@ -27,36 +27,83 @@ for %%M in (%MODELS%) do (
         echo.
         echo [!time!] --- Running Model: %%M / Dataset: %%D
         
-        if "%%M"=="CLAE" (
-            uv run python grid_search.py --model CLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_lambda_grid 1.0 100.0 5 log ^
-                --alpha_grid 0.1 1.0 10 linear ^
-                --beta_grid 0.5 0.5 1 linear
-        )
         if "%%M"=="EASE" (
+            :: EASE: 10 ~ 10000
             uv run python grid_search.py --model EASE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
                 --reg_p_grid 10.0 10000.0 10 log
         )
-        if "%%M"=="RLAE" (
-            uv run python grid_search.py --model RLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_lambda_grid 1.0 100.0 5 log ^
-                --xi_grid 0.0 1.0 5 linear
+        if "%%M"=="LAE" (
+            :: LAE: 10 ~ 10000
+            uv run python grid_search.py --model LAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
+                --reg_p_grid 10.0 10000.0 10 log
         )
-        if "%%M"=="GFCF" (
-            uv run python grid_search.py --model GFCF --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
+        if "%%M"=="RLAE" (
+            :: RLAE: 10 ~ 1000
+            uv run python grid_search.py --model RLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
+                --reg_p_grid 10.0 1000.0 7 log ^
+                --xi_grid 0.0 1.0 11 linear
+        )
+        if "%%M"=="DLAE" (
+            :: DLAE: 10 ~ 1000
+            uv run python grid_search.py --model DLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
+                --reg_p_grid 10.0 1000.0 7 log ^
+                --dropout_grid 0.1 0.9 9 linear
+        )
+        if "%%M"=="DAN_EASE" (
+            :: DAN: 0.01 ~ 100
+            uv run python grid_search.py --model DAN_EASE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
+                --reg_p_grid 0.01 100.0 9 log ^
+                --alpha_grid 0.0 0.5 6 linear ^
+                --beta_grid 0.0 1.0 11 linear
+        )
+        if "%%M"=="DAN_LAE" (
+            :: DAN: 0.01 ~ 100
+            uv run python grid_search.py --model DAN_LAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
+                --reg_p_grid 0.01 100.0 9 log ^
+                --alpha_grid 0.0 0.5 6 linear ^
+                --beta_grid 0.0 1.0 11 linear
+        )
+        if "%%M"=="DAN_RLAE" (
+            :: DAN: 0.01 ~ 100
+            uv run python grid_search.py --model DAN_RLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
+                --reg_p_grid 0.01 100.0 7 log ^
+                --alpha_grid 0.0 0.5 3 linear ^
+                --beta_grid 0.0 1.0 6 linear ^
+                --xi_grid 0.0 1.0 6 linear
+        )
+        if "%%M"=="DAN_DLAE" (
+            :: DAN: 0.01 ~ 100
+            uv run python grid_search.py --model DAN_DLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
+                --reg_p_grid 0.01 100.0 7 log ^
+                --alpha_grid 0.0 0.5 3 linear ^
+                --beta_grid 0.0 1.0 6 linear ^
+                --dropout_grid 0.1 0.9 5 linear
+        )
+        if "%%M"=="ASPIRE_EASE" (
+            :: ASPIRE: 0.01 ~ 100
+            uv run python grid_search.py --model ASPIRE_EASE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
+                --reg_lambda_grid 0.01 100.0 9 log ^
                 --alpha_grid 0.0 1.0 11 linear
         )
-        if "%%M"=="EASE_DAN" (
-            uv run python grid_search.py --model EASE_DAN --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_p_grid 1.0 100.0 5 log ^
-                --alpha_grid 0.1 0.9 3 linear ^
-                --beta_grid 0.1 0.9 3 linear
+        if "%%M"=="ASPIRE_LAE" (
+            :: ASPIRE: 0.01 ~ 100
+            uv run python grid_search.py --model ASPIRE_LAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
+                --reg_lambda_grid 0.01 100.0 9 log ^
+                --alpha_grid 0.0 1.0 11 linear
         )
-        if "%%M"=="IPS_LAE" (
-            :: IPS_LAE: logsigmoid mode
-            uv run python grid_search.py --model IPS_LAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_lambda_grid 0.1 1000.0 5 log ^
-                --wbeta_grid 0.1 1.0 5 linear ^
+        if "%%M"=="ASPIRE_RLAE" (
+            :: ASPIRE: 0.01 ~ 100
+            uv run python grid_search.py --model ASPIRE_RLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
+                --reg_lambda_grid 0.01 100.0 7 log ^
+                --alpha_grid 0.0 1.0 6 linear ^
+                --xi_grid 0.0 1.0 6 linear
+        )
+        if "%%M"=="ASPIRE_DLAE" (
+            :: ASPIRE: 0.01 ~ 100
+            uv run python grid_search.py --model ASPIRE_DLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
+                --reg_lambda_grid 0.01 100.0 7 log ^
+                --alpha_grid 0.0 1.0 6 linear ^
+                --dropout_grid 0.1 0.9 5 linear
         )
         
         if !errorlevel! equ 0 (

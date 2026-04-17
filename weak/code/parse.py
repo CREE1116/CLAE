@@ -17,5 +17,9 @@ def parse_args():
     parser.add_argument('--drop_p', type=float, default=0)
     # RLAE hparams
     parser.add_argument('--xi', type=float, default=0.0)
+    # ASPIRE hparams
+    parser.add_argument('--alpha', type=float, default=0.5)
+    parser.add_argument('--reg_lambda', type=float, default=10.0)
+    parser.add_argument('--dropout_p', type=float, default=0.3)
 
     return parser.parse_args()

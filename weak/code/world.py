@@ -20,6 +20,10 @@ config['diag_const'] = args.diag_const
 config['drop_p'] = args.drop_p
 # RLAE hparams
 config['xi'] = args.xi
+# ASPIRE hparams
+config['alpha'] = args.alpha
+config['reg_lambda'] = args.reg_lambda
+config['dropout_p'] = args.dropout_p
 
 GPU_NUM = args.gpu
 CORES = multiprocessing.cpu_count() // 2

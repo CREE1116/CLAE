@@ -85,9 +85,35 @@ def run_experiment(model, dataset, params, gpu, is_strong=True):
         return flat_results
     return None
 
+def is_already_done(existing_df, params):
+    if existing_df is None or existing_df.empty:
+        return False
+    
+    # Check if a row with the same parameters exists
+    mask = pd.Series([True] * len(existing_df))
+    for k, v in params.items():
+        if k in existing_df.columns:
+            if isinstance(v, float):
+                # Use a small epsilon for float comparison
+                mask &= (existing_df[k] - v).abs() < 1e-6
+            else:
+                mask &= (existing_df[k] == v)
+        else:
+            return False # Column missing, treat as not done
+    return mask.any()
+
 def main():
     parser = argparse.ArgumentParser(description="Grid Search for CLAE/DCLAE")
-    parser.add_argument('--model', type=str, default='CLAE', choices=['CLAE', 'DCLAE', 'EASE', 'GFCF', 'RLAE', 'RDLAE', 'EASE_DAN', 'IPS_LAE'])
+    
+    MODEL_LIST = [
+        'EASE', 'RLAE', 'DLAE', 'LAE', 
+        'DAN_EASE', 'DAN_RLAE', 'DAN_DLAE', 'DAN_LAE', 
+        'ASPIRE_RLAE', 'ASPIRE_EASE', 'ASPIRE_DLAE', 'ASPIRE_LAE',
+        # Others
+        'CLAE', 'DCLAE', 'GFCF', 'RDLAE', 'EDLAE', 'EASE_DAN', 'IPS_LAE'
+    ]
+    
+    parser.add_argument('--model', type=str, default='EASE', choices=MODEL_LIST)
     parser.add_argument('--dataset', type=str, default='yelp2018')
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--mode', type=str, default='strong', choices=['strong', 'weak'])
@@ -100,51 +126,77 @@ def main():
     parser.add_argument('--beta_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
                         default=[0.0, 1.0, 3, 'linear'], help='Grid for beta')
     parser.add_argument('--dropout_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
-                        default=[0.1, 0.7, 4, 'linear'], help='Grid for dropout_p (DCLAE only)')
+                        default=[0.1, 0.7, 4, 'linear'], help='Grid for dropout_p')
     parser.add_argument('--reg_p_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
-                        default=[10, 1000, 5, 'log'], help='Grid for reg_p (EASE family)')
+                        default=[10, 1000, 5, 'log'], help='Grid for reg_p')
     parser.add_argument('--xi_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
-                        default=[0.0, 0.9, 5, 'linear'], help='Grid for xi (RLAE only)')
+                        default=[0.0, 0.9, 5, 'linear'], help='Grid for xi')
     parser.add_argument('--wbeta_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
-                        default=[0.1, 1.0, 5, 'linear'], help='Grid for wbeta (IPS_LAE only)')
+                        default=[0.1, 1.0, 5, 'linear'], help='Grid for wbeta')
     parser.add_argument('--wtype', type=str, default='logsigmoid', help='Fixed wtype for IPS_LAE')
     
     args = parser.parse_args()
 
     os.makedirs("results", exist_ok=True)
+    save_path = f"results/grid_search_{args.model}_{args.dataset}_{args.mode}.csv"
     
+    # Load existing results if file exists
+    existing_df = None
+    if os.path.exists(save_path):
+        try:
+            existing_df = pd.read_csv(save_path)
+            print(f"Loaded {len(existing_df)} existing results from {save_path}")
+        except Exception as e:
+            print(f"Error loading existing results: {e}")
+
     # 그리드 생성
     grid = {}
     
     def process_grid_arg(arg_list):
         return generate_range(float(arg_list[0]), float(arg_list[1]), int(arg_list[2]), arg_list[3])
 
-    if args.model == 'CLAE':
-        grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
-        grid['alpha'] = process_grid_arg(args.alpha_grid)
+    # Model Groupings for Grids
+    if args.model in ['EASE', 'LAE', 'EDLAE']:
+        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
     
-    elif args.model == 'DCLAE':
-        grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
+    elif args.model == 'RLAE':
+        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
+        grid['xi'] = process_grid_arg(args.xi_grid)
+        
+    elif args.model in ['DLAE', 'RDLAE']:
+        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
+        grid['dropout_p'] = process_grid_arg(args.dropout_grid)
+
+    elif args.model in ['DAN_EASE', 'DAN_LAE', 'EASE_DAN']:
+        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
+        grid['alpha'] = process_grid_arg(args.alpha_grid)
+        grid['beta'] = process_grid_arg(args.beta_grid)
+
+    elif args.model == 'DAN_RLAE':
+        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
+        grid['alpha'] = process_grid_arg(args.alpha_grid)
+        grid['beta'] = process_grid_arg(args.beta_grid)
+        grid['xi'] = process_grid_arg(args.xi_grid)
+
+    elif args.model == 'DAN_DLAE':
+        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
         grid['alpha'] = process_grid_arg(args.alpha_grid)
         grid['beta'] = process_grid_arg(args.beta_grid)
         grid['dropout_p'] = process_grid_arg(args.dropout_grid)
 
-    elif args.model == 'RLAE':
-        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
-        grid['xi'] = process_grid_arg(args.xi_grid)
-    
-    elif args.model == 'RDLAE':
-        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
-        grid['drop_p'] = process_grid_arg(args.dropout_grid) # Using dropout_grid for drop_p
-        grid['xi'] = process_grid_arg(args.xi_grid)
-    
-    elif args.model == 'EASE':
-        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
-
-    elif args.model == 'EASE_DAN':
-        grid['reg_p'] = process_grid_arg(args.reg_p_grid)
+    elif args.model in ['ASPIRE_EASE', 'ASPIRE_LAE', 'CLAE']:
+        grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
         grid['alpha'] = process_grid_arg(args.alpha_grid)
-        grid['beta'] = process_grid_arg(args.beta_grid)
+
+    elif args.model == 'ASPIRE_RLAE':
+        grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
+        grid['alpha'] = process_grid_arg(args.alpha_grid)
+        grid['xi'] = process_grid_arg(args.xi_grid)
+
+    elif args.model in ['ASPIRE_DLAE', 'DCLAE']:
+        grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
+        grid['alpha'] = process_grid_arg(args.alpha_grid)
+        grid['dropout_p'] = process_grid_arg(args.dropout_grid)
 
     elif args.model == 'IPS_LAE':
         grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
@@ -158,19 +210,27 @@ def main():
     combinations = [dict(zip(keys, v)) for v in product(*grid.values())]
     
     print(f"Total experiments: {len(combinations)}")
-    all_results = []
     
     is_strong = (args.mode == 'strong')
     
     for params in tqdm(combinations, desc=f"Searching {args.model}"):
+        if is_already_done(existing_df, params):
+            continue
+
         res = run_experiment(args.model, args.dataset, params, args.gpu, is_strong)
         if res:
-            all_results.append(res)
-            df = pd.DataFrame(all_results)
-            save_path = f"results/grid_search_{args.model}_{args.dataset}_{args.mode}.csv"
-            df.to_csv(save_path, index=False)
+            res_df = pd.DataFrame([res])
+            if os.path.exists(save_path):
+                res_df.to_csv(save_path, mode='a', header=False, index=False)
+            else:
+                res_df.to_csv(save_path, mode='w', header=True, index=False)
+            
+            if existing_df is None:
+                existing_df = res_df
+            else:
+                existing_df = pd.concat([existing_df, res_df], ignore_index=True)
 
-    print(f"\nFinished! Results saved to results/grid_search_{args.model}_{args.dataset}_{args.mode}.csv")
+    print(f"\nFinished! Results saved to {save_path}")
 
 if __name__ == "__main__":
     main()

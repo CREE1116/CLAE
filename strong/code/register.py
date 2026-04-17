@@ -16,12 +16,21 @@ print('===========end===================')
 
 MODELS = {
     'EASE': model.EASE,
-    'EDLAE': model.EDLAE,
     'RLAE': model.RLAE,
+    'DLAE': model.DLAE,
+    'LAE': model.LAE,
+    'DAN_EASE': model.DAN_EASE,
+    'DAN_RLAE': model.DAN_RLAE,
+    'DAN_DLAE': model.DAN_DLAE,
+    'DAN_LAE': model.DAN_LAE,
+    'ASPIRE_RLAE': model.ASPIRE_RLAE,
+    'ASPIRE_EASE': model.ASPIRE_EASE,
+    'ASPIRE_DLAE': model.ASPIRE_DLAE,
+    'ASPIRE_LAE': model.ASPIRE_LAE,
+    # Legacy / Compatibility
+    'EDLAE': model.EDLAE,
     'RDLAE': model.RDLAE,
     'GFCF': model.GFCF,
-    'CLAE': model.CLAE,
-    'DCLAE': model.DCLAE,
     'EASE_DAN': model.EASE_DAN,
     'IPS_LAE': model.IPS_LAE,
 }
