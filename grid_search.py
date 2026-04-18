@@ -118,6 +118,7 @@ def main():
     parser.add_argument('--dataset', type=str, default='yelp2018')
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--mode', type=str, default='strong', choices=['strong', 'weak'])
+    parser.add_argument('--save_dir', type=str, default='results', help='Directory to save results')
     
     # 그리드 설정 인자들
     parser.add_argument('--reg_lambda_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
@@ -138,8 +139,8 @@ def main():
     
     args = parser.parse_args()
 
-    os.makedirs("results", exist_ok=True)
-    save_path = f"results/grid_search_{args.model}_{args.dataset}_{args.mode}.csv"
+    os.makedirs(args.save_dir, exist_ok=True)
+    save_path = f"{args.save_dir}/grid_search_{args.model}_{args.dataset}_{args.mode}.csv"
     
     # Load existing results if file exists
     existing_df = None
