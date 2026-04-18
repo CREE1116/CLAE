@@ -31,7 +31,7 @@ for %%D in (%DATASETS%) do (
         --gpu %GPU_ID% ^
         --mode %MODE% ^
         --save_dir %SAVE_DIR% ^
-        --alpha_grid 0.0 1.0 11 linear ^
+        --alpha_grid 0.0 2.0 21 linear ^
         --reg_lambda_grid 1.0 100.0 5 log
 )
 
