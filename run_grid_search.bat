@@ -51,21 +51,21 @@ for %%M in (%MODELS%) do (
         if "%%M"=="DAN_EASE" (
             :: 3 params: 5 x 4 x 5 = 100 trials
             uv run python grid_search.py --model DAN_EASE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_p_grid 0.01 100.0 5 log ^
+                --reg_p_grid 0.1 100.0 5 log ^
                 --alpha_grid 0.0 0.5 4 linear ^
                 --beta_grid 0.0 1.0 5 linear
         )
         if "%%M"=="DAN_LAE" (
             :: 3 params: 5 x 4 x 5 = 100 trials
             uv run python grid_search.py --model DAN_LAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_p_grid 0.01 100.0 5 log ^
+                --reg_p_grid 0.1 100.0 5 log ^
                 --alpha_grid 0.0 0.5 4 linear ^
                 --beta_grid 0.0 1.0 5 linear
         )
         if "%%M"=="DAN_RLAE" (
             :: 4 params: 4 x 3 x 3 x 3 = 108 trials
             uv run python grid_search.py --model DAN_RLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_p_grid 0.01 100.0 4 log ^
+                --reg_p_grid 0.1 100.0 4 log ^
                 --alpha_grid 0.0 0.5 3 linear ^
                 --beta_grid 0.0 1.0 3 linear ^
                 --xi_grid 0.0 1.0 3 linear
@@ -92,7 +92,7 @@ for %%M in (%MODELS%) do (
         if "%%M"=="ASPIRE_RLAE" (
             :: 3 params: 5 x 4 x 5 = 100 trials
             uv run python grid_search.py --model ASPIRE_RLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --reg_lambda_grid 0.01 100.0 5 log ^
+                --reg_lambda_grid 0.1 100.0 5 log ^
                 --alpha_grid 0.0 1.0 4 linear ^
                 --xi_grid 0.0 1.0 5 linear
         )
