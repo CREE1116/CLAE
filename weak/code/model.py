@@ -40,19 +40,160 @@ class BasicModel(nn.Module):
         ratings = torch.sparse.mm(batch_torch, W_gpu)
         return ratings.cpu()
 
+    def _compute_inv_propensity(self, X, wbeta, wtype='logsigmoid'):
+        """공식 코드의 인기도 가중치 계산 로직"""
+        freqs = np.ravel(X.sum(axis=0)).astype(np.float32)
+        
+        if wtype == 'logsigmoid':
+            log_freqs = np.log(freqs + 1)
+            min_log = np.min(log_freqs)
+            max_log = np.max(log_freqs)
+            alpha = -wbeta * (min_log + max_log) / 2
+            logits = alpha + wbeta * log_freqs
+            p_i = 1 / (1 + np.exp(-logits))
+            inv_p = 1 / (p_i + 1e-12)
+        elif wtype == 'powerlaw':
+            norm_pop = freqs / (np.max(freqs) + 1e-12)
+            p = np.power(norm_pop, wbeta)
+            inv_p = 1 / (p + 1e-12)
+        else:
+            inv_p = np.ones_like(freqs)
+            
+        return inv_p
+
     def _compute_aspire_gram(self, X_sp, alpha, eps=1e-12):
-        """ASPIRE (A Structured Proxy IPS) 가중치가 적용된 Gram Matrix 계산 (CPU)"""
-        print(f"  computing ASPIRE Gram Matrix (alpha={alpha})...")
-        n_u = np.asarray(X_sp.sum(axis=1)).ravel().astype(np.float32)
-        u_weights = (1.0 / (np.power(n_u, alpha) + eps)).astype(np.float32)
-        n_i = np.asarray(X_sp.sum(axis=0)).ravel().astype(np.float32)
-        i_weights = np.power(n_i + eps, -alpha / 2.0).astype(np.float32)
-        X_weighted = sparse.diags(u_weights) @ X_sp
-        G = (X_sp.T @ X_weighted).toarray()
-        G = G * i_weights[:, None] * i_weights[None, :]
-        del n_u, n_i, u_weights, X_weighted
-        gc.collect()
-        return G, i_weights
+...
+class IPS_LAE(BasicModel):
+    def __init__(self, config:dict, dataset:BasicDataset):
+        super(IPS_LAE, self).__init__()
+        self.dataset = dataset
+        from world import device
+        self.device = device
+        self.reg_lambda = config.get('reg_lambda', 100.0)
+        self.wbeta = config.get('wbeta', 0.5)
+        self.__init_weight()
+
+    def __init_weight(self):
+        X = self.dataset.UserItemNet
+        self.train_matrix = X
+        train_start = time()
+        print(f"Fitting IPS_LAE (reg={self.reg_lambda}, beta={self.wbeta})...")
+        
+        G_raw = (X.T @ X).toarray()
+        G = G_raw.copy()
+        G[np.diag_indices(G.shape[0])] += self.reg_lambda
+        P_inv = np.linalg.inv(G)
+        
+        W_np = P_inv @ G_raw
+        W_torch = torch.tensor(W_np, dtype=torch.float32, device=self.device)
+        inv_p = self._compute_inv_propensity(X, self.wbeta)
+        self.W_gpu = W_torch * inv_p.view(1, -1)
+        self.train_time = time() - train_start
+
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.train_matrix, self.W_gpu)
+
+
+class IPS_EASE(BasicModel):
+    def __init__(self, config:dict, dataset:BasicDataset):
+        super(IPS_EASE, self).__init__()
+        self.dataset = dataset
+        from world import device
+        self.device = device
+        self.reg_lambda = config.get('reg_lambda', 100.0)
+        self.wbeta = config.get('wbeta', 0.5)
+        self.__init_weight()
+
+    def __init_weight(self):
+        X = self.dataset.UserItemNet
+        self.train_matrix = X
+        train_start = time()
+        print(f"Fitting IPS_EASE (reg={self.reg_lambda}, beta={self.wbeta})...")
+        
+        G = (X.T @ X).toarray()
+        G[np.diag_indices(G.shape[0])] += self.reg_lambda
+        P = np.linalg.inv(G)
+        diag_P = np.diag(P)
+        W_np = -P / (diag_P + 1e-12)
+        np.fill_diagonal(W_np, 0)
+        
+        W_torch = torch.tensor(W_np, dtype=torch.float32, device=self.device)
+        inv_p = self._compute_inv_propensity(X, self.wbeta)
+        self.W_gpu = W_torch * inv_p.view(1, -1)
+        self.train_time = time() - train_start
+
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.train_matrix, self.W_gpu)
+
+
+class IPS_RLAE(BasicModel):
+    def __init__(self, config:dict, dataset:BasicDataset):
+        super(IPS_RLAE, self).__init__()
+        self.dataset = dataset
+        from world import device
+        self.device = device
+        self.reg_lambda = config.get('reg_lambda', 100.0)
+        self.wbeta = config.get('wbeta', 0.5)
+        self.xi = config.get('xi', 0.0)
+        self.__init_weight()
+
+    def __init_weight(self):
+        X = self.dataset.UserItemNet
+        self.train_matrix = X
+        train_start = time()
+        print(f"Fitting IPS_RLAE (reg={self.reg_lambda}, beta={self.wbeta}, xi={self.xi})...")
+        
+        G = (X.T @ X).toarray()
+        G[np.diag_indices(X.shape[1])] += self.reg_lambda
+        P = np.linalg.inv(G)
+        diag_P = np.diag(P)
+        condition = (1 - self.reg_lambda * diag_P) > self.xi
+        lagrangian = ((1 - self.xi) / (diag_P + 1e-12) - self.reg_lambda) * condition.astype(float)
+        W_np = P * -(lagrangian + self.reg_lambda)
+        np.fill_diagonal(W_np, 0)
+        
+        W_torch = torch.tensor(W_np, dtype=torch.float32, device=self.device)
+        inv_p = self._compute_inv_propensity(X, self.wbeta)
+        self.W_gpu = W_torch * inv_p.view(1, -1)
+        self.train_time = time() - train_start
+
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.train_matrix, self.W_gpu)
+
+
+class IPS_DLAE(BasicModel):
+    def __init__(self, config:dict, dataset:BasicDataset):
+        super(IPS_DLAE, self).__init__()
+        self.dataset = dataset
+        from world import device
+        self.device = device
+        self.dropout_p = config.get('dropout_p', 0.3)
+        self.wbeta = config.get('wbeta', 0.5)
+        self.__init_weight()
+
+    def __init_weight(self):
+        X = self.dataset.UserItemNet
+        self.train_matrix = X
+        train_start = time()
+        print(f"Fitting IPS_DLAE (dropout={self.dropout_p}, beta={self.wbeta})...")
+        
+        G_raw = (X.T @ X).toarray()
+        n_i = np.asarray(X.sum(axis=0)).ravel().astype(np.float32)
+        p = min(self.dropout_p, 0.99)
+        Lambda = (p / (1.0 - p)) * n_i
+        
+        G = G_raw.copy()
+        G[np.diag_indices(G.shape[0])] += Lambda
+        P_inv = np.linalg.inv(G)
+        
+        W_np = P_inv @ G_raw
+        W_torch = torch.tensor(W_np, dtype=torch.float32, device=self.device)
+        inv_p = self._compute_inv_propensity(X, self.wbeta)
+        self.W_gpu = W_torch * inv_p.view(1, -1)
+        self.train_time = time() - train_start
+
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.train_matrix, self.W_gpu)
 
     def _compute_dan_gram(self, X_sp, alpha, beta, eps=1e-12):
         """DAN (Degree-Aware Normalization) 가중치가 적용된 Gram Matrix 계산 (CPU)"""

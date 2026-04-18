@@ -109,8 +109,9 @@ def main():
         'EASE', 'RLAE', 'DLAE', 'LAE', 
         'DAN_EASE', 'DAN_RLAE', 'DAN_DLAE', 'DAN_LAE', 
         'ASPIRE_RLAE', 'ASPIRE_EASE', 'ASPIRE_DLAE', 'ASPIRE_LAE',
+        'IPS_LAE', 'IPS_EASE', 'IPS_RLAE', 'IPS_DLAE',
         # Others
-        'CLAE', 'DCLAE', 'GFCF', 'RDLAE', 'EDLAE', 'EASE_DAN', 'IPS_LAE'
+        'CLAE', 'DCLAE', 'GFCF', 'RDLAE', 'EDLAE', 'EASE_DAN'
     ]
     
     parser.add_argument('--model', type=str, default='EASE', choices=MODEL_LIST)
@@ -133,7 +134,7 @@ def main():
                         default=[0.0, 0.9, 5, 'linear'], help='Grid for xi')
     parser.add_argument('--wbeta_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
                         default=[0.1, 1.0, 5, 'linear'], help='Grid for wbeta')
-    parser.add_argument('--wtype', type=str, default='logsigmoid', help='Fixed wtype for IPS_LAE')
+    parser.add_argument('--wtype', type=str, default='logsigmoid', help='Fixed wtype for IPS models')
     
     args = parser.parse_args()
 
@@ -202,8 +203,19 @@ def main():
         grid['alpha'] = process_grid_arg(args.alpha_grid)
         grid['dropout_p'] = process_grid_arg(args.dropout_grid)
 
-    elif args.model == 'IPS_LAE':
+    elif args.model in ['IPS_LAE', 'IPS_EASE']:
         grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
+        grid['wbeta'] = process_grid_arg(args.wbeta_grid)
+        grid['wtype'] = [args.wtype]
+
+    elif args.model == 'IPS_RLAE':
+        grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
+        grid['wbeta'] = process_grid_arg(args.wbeta_grid)
+        grid['xi'] = process_grid_arg(args.xi_grid)
+        grid['wtype'] = [args.wtype]
+
+    elif args.model == 'IPS_DLAE':
+        grid['dropout_p'] = process_grid_arg(args.dropout_grid)
         grid['wbeta'] = process_grid_arg(args.wbeta_grid)
         grid['wtype'] = [args.wtype]
 

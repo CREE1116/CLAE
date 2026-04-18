@@ -33,4 +33,7 @@ MODELS = {
     'GFCF': model.GFCF,
     'EASE_DAN': model.EASE_DAN,
     'IPS_LAE': model.IPS_LAE,
+    'IPS_EASE': model.IPS_EASE,
+    'IPS_RLAE': model.IPS_RLAE,
+    'IPS_DLAE': model.IPS_DLAE,
 }
