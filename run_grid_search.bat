@@ -124,7 +124,7 @@ for %%M in (%MODELS%) do (
         if "%%M"=="IPS_DLAE" (
             :: 2 params: 10 x 10 = 100 trials
             uv run python grid_search.py --model IPS_DLAE --dataset %%D --gpu %GPU_ID% --mode %MODE% ^
-                --dropout_p_grid 0.1 0.9 10 linear ^
+                --dropout_grid 0.1 0.9 10 linear ^
                 --wbeta_grid 0.0 1.0 10 linear
         )
         
