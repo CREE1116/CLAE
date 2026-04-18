@@ -35,6 +35,9 @@ config['reg_lambda'] = args.reg_lambda
 config['beta'] = args.beta
 # DCLAE hparams
 config['dropout_p'] = args.dropout_p
+# IPS hparams
+config['wbeta'] = args.wbeta
+config['wtype'] = args.wtype
 
 CORES = multiprocessing.cpu_count() // 2
 
