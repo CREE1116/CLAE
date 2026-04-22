@@ -70,10 +70,9 @@ def summarize_results():
                     best_row = best_rows.iloc[0]
                 
                 # Prepare row for summary
-                # Required columns: model, valid_ndcg_100, NDCG@10, Recall@10, uNDCG@10, ... best_params
-                result_cols = ['model', 'valid_ndcg_100', 'NDCG@10', 'Recall@10', 'uNDCG@10', 
-                               'NDCG@20', 'Recall@20', 'uNDCG@20', 'NDCG@50', 'Recall@50', 'uNDCG@50', 
-                               'NDCG@100', 'Recall@100', 'uNDCG@100']
+                # Dynamically include all metric columns
+                metric_prefixes = ['NDCG', 'Recall', 'Precision', 'uNDCG', 'uRecall', 'uPrecision', 'valid_ndcg_100']
+                result_cols = ['model'] + [c for c in best_row.index if any(c.startswith(p) for p in metric_prefixes)]
                 
                 row_data = {col: best_row[col] for col in result_cols if col in best_row}
                 

@@ -27,6 +27,10 @@ MODELS = {
     'ASPIRE_EASE': model.ASPIRE_EASE,
     'ASPIRE_DLAE': model.ASPIRE_DLAE,
     'ASPIRE_LAE': model.ASPIRE_LAE,
+    'DAspire_EASE': model.DAspire_EASE,
+    'DAspire_LAE': model.DAspire_LAE,
+    'DAspire_RLAE': model.DAspire_RLAE,
+    'DAspire_DLAE': model.DAspire_DLAE,
     # Legacy / Compatibility
     'EDLAE': model.EDLAE,
     'RDLAE': model.RDLAE,

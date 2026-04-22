@@ -53,6 +53,26 @@ class BasicModel(nn.Module):
         gc.collect()
         return G, i_weights
 
+    def _compute_daspire_gram(self, X_sp, alpha, beta, eps=1e-12):
+        """DAspire (Decoupled ASPIRE) 가중치가 적용된 Gram Matrix 계산 (CPU)
+        alpha: Item degree exponent (tuned in 0~0.5)
+        beta: User degree exponent (tuned in 0~1.0)
+        """
+        print(f"  computing DAspire Gram Matrix (alpha={alpha}, beta={beta})...")
+        n_u = np.asarray(X_sp.sum(axis=1)).ravel().astype(np.float32)
+        u_weights = (1.0 / (np.power(n_u, beta) + eps)).astype(np.float32)
+        
+        n_i = np.asarray(X_sp.sum(axis=0)).ravel().astype(np.float32)
+        i_weights = np.power(n_i + eps, -alpha).astype(np.float32)
+        
+        X_weighted = sparse.diags(u_weights) @ X_sp
+        G = (X_sp.T @ X_weighted).toarray()
+        G = G * i_weights[:, None] * i_weights[None, :]
+        
+        del n_u, n_i, u_weights, X_weighted
+        gc.collect()
+        return G, i_weights
+
     def _compute_dan_gram(self, X_sp, alpha, beta, eps=1e-12):
         """DAN (Degree-Aware Normalization) 가중치가 적용된 Gram Matrix 계산 (CPU)"""
         print(f"  computing DAN Gram Matrix (alpha={alpha}, beta={beta})...")
@@ -533,6 +553,159 @@ class ASPIRE_DLAE(BasicModel):
         print(f"Fitting ASPIRE_DLAE on {self.device}...")
         
         G_aspire, _ = self._compute_aspire_gram(X_sp, self.alpha)
+        
+        p = min(self.dropout_p, 0.99)
+        # Lambda = p/(1-p) * diag(G_aspire)
+        w_dropout = (p / (1.0 - p)) * np.diag(G_aspire)
+        
+        G = G_aspire.copy()
+        G[np.diag_indices_from(G)] += w_dropout
+        P_inv = np.linalg.inv(G)
+        
+        # W = (G_aspire + Lambda)^-1 * G_aspire
+        W = P_inv @ G_aspire
+        
+        self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
+        self.train_time = time() - train_start
+        self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
+
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.test_matrix, self.W_gpu)
+
+    def getvalidUsersRating(self, users):
+        return self._get_batch_ratings(users, self.valid_matrix, self.W_gpu)
+
+
+class DAspire_EASE(BasicModel):
+    """DAspire-EASE: Decoupled ASPIRE with Constrained Ridge Regression"""
+    def __init__(self, config:dict, dataset:BasicDataset):
+        super(DAspire_EASE, self).__init__()
+        self.dataset = dataset
+        from world import device
+        self.device = device
+        self.reg_lambda = config.get('reg_lambda', 10.0) 
+        self.alpha      = config.get('alpha', 0.5) # Item degree
+        self.beta       = config.get('beta', 0.5)  # User degree
+        self.__init_weight()
+
+    def __init_weight(self):
+        X_sp = self.dataset.UserItemNet
+        self.valid_matrix = self.dataset.validUserItemNet.tocsr()
+        self.test_matrix = self.dataset.testUserItemNet.tocsr()
+        train_start = time()
+        print(f"Fitting DAspire_EASE on {self.device}...")
+        G, _ = self._compute_daspire_gram(X_sp, self.alpha, self.beta)
+        G[np.diag_indices_from(G)] += self.reg_lambda
+        P = np.linalg.inv(G)
+        diag_P = np.diag(P)
+        P /= -(diag_P + 1e-12)
+        np.fill_diagonal(P, 0)
+        self.W_gpu = torch.tensor(P, dtype=torch.float32, device=self.device)
+        self.train_time = time() - train_start
+        self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
+
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.test_matrix, self.W_gpu)
+
+    def getvalidUsersRating(self, users):
+        return self._get_batch_ratings(users, self.valid_matrix, self.W_gpu)
+
+
+class DAspire_LAE(BasicModel):
+    """DAspire-LAE: Decoupled ASPIRE with Unconstrained Ridge Regression"""
+    def __init__(self, config:dict, dataset:BasicDataset):
+        super(DAspire_LAE, self).__init__()
+        self.dataset = dataset
+        from world import device
+        self.device = device
+        self.reg_lambda = config.get('reg_lambda', 10.0) 
+        self.alpha      = config.get('alpha', 0.5)
+        self.beta       = config.get('beta', 0.5)
+        self.__init_weight()
+
+    def __init_weight(self):
+        X_sp = self.dataset.UserItemNet
+        self.valid_matrix = self.dataset.validUserItemNet.tocsr()
+        self.test_matrix = self.dataset.testUserItemNet.tocsr()
+        train_start = time()
+        print(f"Fitting DAspire_LAE on {self.device}...")
+        G_aspire, _ = self._compute_daspire_gram(X_sp, self.alpha, self.beta)
+        
+        G = G_aspire.copy()
+        G[np.diag_indices_from(G)] += self.reg_lambda
+        P_inv = np.linalg.inv(G)
+        
+        # W = (G_aspire + lambda I)^-1 * G_aspire
+        W = P_inv @ G_aspire
+        self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
+        self.train_time = time() - train_start
+        self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
+
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.test_matrix, self.W_gpu)
+
+    def getvalidUsersRating(self, users):
+        return self._get_batch_ratings(users, self.valid_matrix, self.W_gpu)
+
+
+class DAspire_RLAE(BasicModel):
+    """DAspire-RLAE: Decoupled ASPIRE with Lagrangian Relaxation"""
+    def __init__(self, config:dict, dataset:BasicDataset):
+        super(DAspire_RLAE, self).__init__()
+        self.dataset = dataset
+        from world import device
+        self.device = device
+        self.reg_lambda = config.get('reg_lambda', 10.0) 
+        self.alpha      = config.get('alpha', 0.5)
+        self.beta       = config.get('beta', 0.5)
+        self.xi         = config.get('xi', 0.0)
+        self.__init_weight()
+
+    def __init_weight(self):
+        X_sp = self.dataset.UserItemNet
+        self.valid_matrix = self.dataset.validUserItemNet.tocsr()
+        self.test_matrix = self.dataset.testUserItemNet.tocsr()
+        train_start = time()
+        print(f"Fitting DAspire_RLAE on {self.device}...")
+        G, _ = self._compute_daspire_gram(X_sp, self.alpha, self.beta)
+        G[np.diag_indices_from(G)] += self.reg_lambda
+        P = np.linalg.inv(G)
+        diag_P = np.diag(P)
+        condition = (1.0 - self.reg_lambda * diag_P) > self.xi
+        lagrangian = ((1.0 - self.xi) / (diag_P + 1e-12) - self.reg_lambda) * condition.astype(float)
+        W = P * -(lagrangian + self.reg_lambda)
+        np.fill_diagonal(W, 0)
+        self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
+        self.train_time = time() - train_start
+        self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
+
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.test_matrix, self.W_gpu)
+
+    def getvalidUsersRating(self, users):
+        return self._get_batch_ratings(users, self.valid_matrix, self.W_gpu)
+
+
+class DAspire_DLAE(BasicModel):
+    """DAspire-DLAE: Decoupled ASPIRE with Dropout Penalty"""
+    def __init__(self, config:dict, dataset:BasicDataset):
+        super(DAspire_DLAE, self).__init__()
+        self.dataset = dataset
+        from world import device
+        self.device = device
+        self.alpha      = config.get('alpha', 0.5)
+        self.beta       = config.get('beta', 0.5)
+        self.dropout_p  = config.get('dropout_p', 0.3)
+        self.__init_weight()
+
+    def __init_weight(self):
+        X_sp = self.dataset.UserItemNet
+        self.valid_matrix = self.dataset.validUserItemNet.tocsr()
+        self.test_matrix = self.dataset.testUserItemNet.tocsr()
+        train_start = time()
+        print(f"Fitting DAspire_DLAE on {self.device}...")
+        
+        G_aspire, _ = self._compute_daspire_gram(X_sp, self.alpha, self.beta)
         
         p = min(self.dropout_p, 0.99)
         # Lambda = p/(1-p) * diag(G_aspire)

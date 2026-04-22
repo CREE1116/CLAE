@@ -78,9 +78,30 @@ def run_experiment(model, dataset, params, gpu, is_strong=True):
         topks = [10, 20, 50, 100]
         for i, k in enumerate(topks):
             if i < len(parsed['ndcg']):
+                # Standard Metrics
                 flat_results[f"NDCG@{k}"] = parsed['ndcg'][i]
                 flat_results[f"Recall@{k}"] = parsed['recall'][i]
-                flat_results[f"uNDCG@{k}"] = parsed['undcg'][i]
+                flat_results[f"Precision@{k}"] = parsed['precision'][i]
+                
+                # Unbiased Metrics
+                if 'undcg' in parsed:
+                    flat_results[f"uNDCG@{k}"] = parsed['undcg'][i]
+                if 'urecall' in parsed:
+                    flat_results[f"uRecall@{k}"] = parsed['urecall'][i]
+                if 'uprecision' in parsed:
+                    flat_results[f"uPrecision@{k}"] = parsed['uprecision'][i]
+                
+                # Head Metrics
+                if 'ndcg(head)' in parsed:
+                    flat_results[f"NDCG(head)@{k}"] = parsed['ndcg(head)'][i]
+                    flat_results[f"Recall(head)@{k}"] = parsed['recall(head)'][i]
+                    flat_results[f"Precision(head)@{k}"] = parsed['precision(head)'][i]
+                
+                # Tail Metrics
+                if 'ndcg(tail)' in parsed:
+                    flat_results[f"NDCG(tail)@{k}"] = parsed['ndcg(tail)'][i]
+                    flat_results[f"Recall(tail)@{k}"] = parsed['recall(tail)'][i]
+                    flat_results[f"Precision(tail)@{k}"] = parsed['precision(tail)'][i]
         
         return flat_results
     return None
@@ -109,6 +130,7 @@ def main():
         'EASE', 'RLAE', 'DLAE', 'LAE', 
         'DAN_EASE', 'DAN_RLAE', 'DAN_DLAE', 'DAN_LAE', 
         'ASPIRE_RLAE', 'ASPIRE_EASE', 'ASPIRE_DLAE', 'ASPIRE_LAE',
+        'DAspire_LAE', 'DAspire_EASE', 'DAspire_RLAE', 'DAspire_DLAE',
         'IPS_LAE', 'IPS_EASE', 'IPS_RLAE', 'IPS_DLAE',
         # Others
         'CLAE', 'DCLAE', 'GFCF', 'RDLAE', 'EDLAE', 'EASE_DAN'
@@ -187,6 +209,22 @@ def main():
         grid['xi'] = process_grid_arg(args.xi_grid)
 
     elif args.model == 'DAN_DLAE':
+        grid['alpha'] = process_grid_arg(args.alpha_grid)
+        grid['beta'] = process_grid_arg(args.beta_grid)
+        grid['dropout_p'] = process_grid_arg(args.dropout_grid)
+
+    elif args.model in ['DAspire_EASE', 'DAspire_LAE']:
+        grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
+        grid['alpha'] = process_grid_arg(args.alpha_grid)
+        grid['beta'] = process_grid_arg(args.beta_grid)
+
+    elif args.model == 'DAspire_RLAE':
+        grid['reg_lambda'] = process_grid_arg(args.reg_lambda_grid)
+        grid['alpha'] = process_grid_arg(args.alpha_grid)
+        grid['beta'] = process_grid_arg(args.beta_grid)
+        grid['xi'] = process_grid_arg(args.xi_grid)
+
+    elif args.model == 'DAspire_DLAE':
         grid['alpha'] = process_grid_arg(args.alpha_grid)
         grid['beta'] = process_grid_arg(args.beta_grid)
         grid['dropout_p'] = process_grid_arg(args.dropout_grid)

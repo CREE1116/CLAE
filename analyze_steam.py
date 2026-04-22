@@ -69,7 +69,7 @@ cols_to_show = ['model'] + sorted_metrics + ['best_params']
 
 print("\n=== Steam Strong Dataset Grid Search Comparison (All Metrics) ===")
 # 터미널 가독성을 위해 상위 몇개 지표만 출력 (CSV에는 다 저장)
-display_cols = ['model', 'valid_ndcg_100', 'NDCG@10', 'Recall@10', 'NDCG@100', 'Recall@100', 'uNDCG@100']
+display_cols = ['model', 'valid_ndcg_100', 'NDCG@100', 'Recall@100', 'NDCG(head)@100', 'NDCG(tail)@100']
 print(comparison_df[display_cols].to_string(index=False))
 
 # CSV 파일로 저장 (모든 지표 포함)
