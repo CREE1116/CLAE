@@ -3,8 +3,8 @@
 # ==========================================
 # Grid Search Configuration (Balanced Budget ~100 trials/model)
 # ==========================================
-# MODELS=("EASE" "RLAE" "DLAE" "LAE" "DAN_EASE" "DAN_RLAE" "DAN_DLAE" "DAN_LAE" "ASPIRE_RLAE" "ASPIRE_EASE" "ASPIRE_DLAE" "ASPIRE_LAE" "IPS_LAE" "IPS_EASE" "IPS_RLAE" "IPS_DLAE")
-MODELS=("IPS_LAE" "IPS_EASE" "IPS_DLAE")
+# MODELS=("EASE" "RLAE" "DLAE" "LAE" "DAN_EASE" "DAN_RLAE" "DAN_DLAE" "DAN_LAE" "ASPIRE_RLAE" "ASPIRE_EASE" "ASPIRE_DLAE" "ASPIRE_LAE" "DAspire_EASE" "DAspire_LAE" "DAspire_RLAE" "DAspire_DLAE" "IPS_LAE" "IPS_EASE" "IPS_RLAE" "IPS_DLAE")
+MODELS=("EASE" "RLAE" "DLAE" "LAE" "DAN_EASE" "DAN_RLAE" "DAN_DLAE" "DAN_LAE" "ASPIRE_RLAE" "ASPIRE_EASE" "ASPIRE_DLAE" "ASPIRE_LAE" "IPS_LAE" "IPS_EASE" "IPS_RLAE" "IPS_DLAE")
 # Datasets to run
 DATASETS=("steam")
 
@@ -81,6 +81,28 @@ for M in "${MODELS[@]}"; do
                     --alpha_grid 0.1 1.0 10 linear \
                     --dropout_grid 0.1 0.9 9 linear
                 ;;
+            "DAspire_EASE"|"DAspire_LAE")
+                # 3 params: 5 x 4 x 5 = 100 trials
+                uv run python grid_search.py --model "$M" --dataset "$D" --gpu $GPU_ID --mode "$MODE" \
+                    --reg_lambda_grid 0.1 100.0 5 log \
+                    --alpha_grid 0.0 0.5 4 linear \
+                    --beta_grid 0.0 1.0 5 linear
+                ;;
+            "DAspire_RLAE")
+                # 4 params: 4 x 3 x 3 x 3 = 108 trials
+                uv run python grid_search.py --model "$M" --dataset "$D" --gpu $GPU_ID --mode "$MODE" \
+                    --reg_lambda_grid 0.1 100.0 4 log \
+                    --alpha_grid 0.0 0.5 3 linear \
+                    --beta_grid 0.0 1.0 3 linear \
+                    --xi_grid 0.0 1.0 3 linear
+                ;;
+            "DAspire_DLAE")
+                # 3 params: 4 x 5 x 5 = 100 trials
+                uv run python grid_search.py --model "$M" --dataset "$D" --gpu $GPU_ID --mode "$MODE" \
+                    --alpha_grid 0.0 0.5 4 linear \
+                    --beta_grid 0.0 1.0 5 linear \
+                    --dropout_grid 0.1 0.9 5 linear
+                 ;;
             "IPS_LAE"|"IPS_EASE")
                 # 2 params: 10 x 10 = 100 trials
                 uv run python grid_search.py --model "$M" --dataset "$D" --gpu $GPU_ID --mode "$MODE" \

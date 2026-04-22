@@ -33,9 +33,10 @@ def parse_results(output):
         return None
     
     res_str = match.group(0)
-    res_str = res_str.replace('array(', '').replace(')', '')
+    # Remove 'array(' and the corresponding ')' for each array
+    res_str = re.sub(r'array\((.*?)\)', r'\1', res_str, flags=re.DOTALL)
     try:
-        # eval 환경에서 numpy array를 처리하기 위해 np 정의
+        # Evaluate the string as a dictionary
         results = eval(res_str, {"np": np, "array": np.array})
         return results
     except Exception as e:
