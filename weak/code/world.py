@@ -22,6 +22,7 @@ config['drop_p'] = args.drop_p
 config['xi'] = args.xi
 # ASPIRE hparams
 config['alpha'] = args.alpha
+config['beta'] = args.beta
 config['reg_lambda'] = args.reg_lambda
 config['dropout_p'] = args.dropout_p
 # IPS hparams
@@ -59,3 +60,4 @@ def cprint(words : str):
     
 if torch.cuda.is_available():
     print ('Current cuda device ', torch.cuda.current_device()) # check
+

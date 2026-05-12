@@ -48,16 +48,22 @@ class BasicModel(nn.Module):
         G = G * i_weights[:, None] * i_weights[None, :]
         del n_u, n_i, u_weights, X_weighted
         gc.collect()
-        # --- Scaling Compensation ---
-        if alpha != 0:
-            G_0 = (X_sp.T @ X_sp).toarray()
-            norm_0 = np.linalg.norm(G_0)
-            norm_alpha = np.linalg.norm(G)
-            G = G * (norm_0 / (norm_alpha + eps))
-            del G_0
-        # ----------------------------
-
         return G, i_weights
+
+    def _compute_aspire_lambda(self, X_sp, alpha, base_lambda, eps=1e-12):
+        """γ에 따른 λ 보상 계수 계산"""
+        if alpha == 0:
+            return base_lambda
+        
+        n_u = np.asarray(X_sp.sum(axis=1)).ravel().astype(np.float32)
+        n_i = np.asarray(X_sp.sum(axis=0)).ravel().astype(np.float32)
+        
+        E_di       = np.mean(n_i)                        # E[d_i], γ=0 기준
+        E_di_gamma = np.mean(n_i ** (1.0 - alpha))       # E[d_i^{1-γ}]
+        E_du_gamma = np.mean(n_u ** (-alpha))             # E[d_u^{-γ}]
+        
+        scale = (E_di_gamma * E_du_gamma) / (E_di + eps)
+        return base_lambda * scale
 
 
     def _compute_daspire_gram(self, X_sp, alpha, beta, eps=1e-12):
@@ -456,8 +462,10 @@ class ASPIRE_LAE(BasicModel):
         print(f"Fitting ASPIRE_LAE on {self.device}...")
         G_aspire, _ = self._compute_aspire_gram(X_sp, self.alpha)
         
+        effective_lambda = self._compute_aspire_lambda(X_sp, self.alpha, self.reg_lambda)
+        
         G = G_aspire.copy()
-        G[np.diag_indices_from(G)] += self.reg_lambda
+        G[np.diag_indices_from(G)] += effective_lambda
         P_inv = np.linalg.inv(G)
         
         # W = (G_aspire + lambda I)^-1 * G_aspire
@@ -489,8 +497,12 @@ class ASPIRE_EASE(BasicModel):
         self.valid_matrix = self.dataset.validUserItemNet.tocsr()
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
         train_start = time()
+        print(f"Fitting ASPIRE_EASE on {self.device}...")
         G, _ = self._compute_aspire_gram(X_sp, self.alpha)
-        G[np.diag_indices_from(G)] += self.reg_lambda
+        
+        effective_lambda = self._compute_aspire_lambda(X_sp, self.alpha, self.reg_lambda)
+        
+        G[np.diag_indices_from(G)] += effective_lambda
         P = np.linalg.inv(G)
         diag_P = np.diag(P)
         P /= -(diag_P + 1e-12)
@@ -522,13 +534,17 @@ class ASPIRE_RLAE(BasicModel):
         self.valid_matrix = self.dataset.validUserItemNet.tocsr()
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
         train_start = time()
+        print(f"Fitting ASPIRE_RLAE on {self.device}...")
         G, _ = self._compute_aspire_gram(X_sp, self.alpha)
-        G[np.diag_indices_from(G)] += self.reg_lambda
+        
+        effective_lambda = self._compute_aspire_lambda(X_sp, self.alpha, self.reg_lambda)
+        
+        G[np.diag_indices_from(G)] += effective_lambda
         P = np.linalg.inv(G)
         diag_P = np.diag(P)
-        condition = (1.0 - self.reg_lambda * diag_P) > self.xi
-        lagrangian = ((1.0 - self.xi) / (diag_P + 1e-12) - self.reg_lambda) * condition.astype(float)
-        W = P * -(lagrangian + self.reg_lambda)
+        condition = (1.0 - effective_lambda * diag_P) > self.xi
+        lagrangian = ((1.0 - self.xi) / (diag_P + 1e-12) - effective_lambda) * condition.astype(float)
+        W = P * -(lagrangian + effective_lambda)
         np.fill_diagonal(W, 0)
         self.W_gpu = torch.tensor(W, dtype=torch.float32, device=self.device)
         self.train_time = time() - train_start
