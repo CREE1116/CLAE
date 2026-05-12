@@ -134,7 +134,7 @@ def main():
         'DAspire_LAE', 'DAspire_EASE', 'DAspire_RLAE', 'DAspire_DLAE',
         'IPS_LAE', 'IPS_EASE', 'IPS_RLAE', 'IPS_DLAE',
         # Others
-        'CLAE', 'DCLAE', 'GFCF', 'RDLAE', 'EDLAE', 'EASE_DAN'
+        'CLAE', 'DCLAE', 'GFCF', 'ASPIRE_GFCF', 'RDLAE', 'EDLAE', 'EASE_DAN'
     ]
     
     parser.add_argument('--model', type=str, default='EASE', choices=MODEL_LIST)
@@ -148,6 +148,8 @@ def main():
                         default=[0.1, 100.0, 5, 'log'], help='Grid for reg_lambda')
     parser.add_argument('--alpha_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
                         default=[0.0, 1.0, 3, 'linear'], help='Grid for alpha')
+    parser.add_argument('--aspire_alpha_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
+                        default=[0.0, 0.5, 5, 'linear'], help='Grid for aspire_alpha')
     parser.add_argument('--beta_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
                         default=[0.0, 1.0, 3, 'linear'], help='Grid for beta')
     parser.add_argument('--dropout_grid', nargs=4, metavar=('START', 'END', 'NUM', 'SCALE'), 
@@ -261,6 +263,10 @@ def main():
 
     elif args.model == 'GFCF':
         grid['alpha'] = process_grid_arg(args.alpha_grid)
+
+    elif args.model == 'ASPIRE_GFCF':
+        grid['alpha'] = process_grid_arg(args.alpha_grid)
+        grid['aspire_alpha'] = process_grid_arg(args.aspire_alpha_grid)
 
     keys = list(grid.keys())
     combinations = [dict(zip(keys, v)) for v in product(*grid.values())]

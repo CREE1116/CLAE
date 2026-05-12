@@ -35,6 +35,7 @@ MODELS = {
     'EDLAE': model.EDLAE,
     'RDLAE': model.RDLAE,
     'GFCF': model.GFCF,
+    'ASPIRE_GFCF': model.ASPIRE_GFCF,
     'EASE_DAN': model.EASE_DAN,
     'IPS_LAE': model.IPS_LAE,
     'IPS_EASE': model.IPS_EASE,

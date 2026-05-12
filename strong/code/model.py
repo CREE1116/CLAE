@@ -41,17 +41,24 @@ class BasicModel(nn.Module):
         print(f"  computing ASPIRE Gram Matrix (alpha={alpha})...")
         n_u = np.asarray(X_sp.sum(axis=1)).ravel().astype(np.float32)
         u_weights = (1.0 / (np.power(n_u, alpha) + eps)).astype(np.float32)
-        
         n_i = np.asarray(X_sp.sum(axis=0)).ravel().astype(np.float32)
         i_weights = np.power(n_i + eps, -alpha / 2.0).astype(np.float32)
-        
         X_weighted = sparse.diags(u_weights) @ X_sp
         G = (X_sp.T @ X_weighted).toarray()
         G = G * i_weights[:, None] * i_weights[None, :]
-        
         del n_u, n_i, u_weights, X_weighted
         gc.collect()
+        # --- Scaling Compensation ---
+        if alpha != 0:
+            G_0 = (X_sp.T @ X_sp).toarray()
+            norm_0 = np.linalg.norm(G_0)
+            norm_alpha = np.linalg.norm(G)
+            G = G * (norm_0 / (norm_alpha + eps))
+            del G_0
+        # ----------------------------
+
         return G, i_weights
+
 
     def _compute_daspire_gram(self, X_sp, alpha, beta, eps=1e-12):
         """DAspire (Decoupled ASPIRE) 가중치가 적용된 Gram Matrix 계산 (CPU)
@@ -738,6 +745,8 @@ class GFCF(BasicModel):
         super(GFCF, self).__init__()
         self.dataset = dataset
         self.alpha = config['alpha']
+        from world import device
+        self.device = device
         self.__init_weight()
     
     def __init_weight(self):
@@ -760,9 +769,68 @@ class GFCF(BasicModel):
         A_norm = D_u @ X_sp @ D_i
         U, S, Vt = linalg.svds(A_norm.tocsc(), k=256)
         
-        self.W = (D_i @ Vt.T @ Vt @ sparse.diags(1.0/(d_inv_i + 1e-12))).toarray()
+        # Mirror GFCF filter logic: Linear + alpha * SVD
+        W_linear = (A_norm.T @ A_norm).toarray()
+        W_svd = (D_i @ Vt.T @ Vt @ sparse.diags(1.0/(d_inv_i + 1e-12)))
+        
+        self.W = W_linear + self.alpha * W_svd
         self.W_gpu = torch.tensor(self.W, dtype=torch.float32, device=self.device)
         
+        self.train_time = time() - train_start
+        self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
+
+    def getUsersRating(self, users):
+        return self._get_batch_ratings(users, self.test_matrix, self.W_gpu)
+
+    def getvalidUsersRating(self, users):
+        return self._get_batch_ratings(users, self.valid_matrix, self.W_gpu)
+
+
+
+class ASPIRE_GFCF(BasicModel):
+    def __init__(self, config: dict, dataset: BasicDataset):
+        super(ASPIRE_GFCF, self).__init__()
+        self.dataset = dataset
+        from world import device
+        self.device = device
+        self.alpha = config['alpha']
+        self.aspire_alpha = config.get("aspire_alpha", 0.5) # ASPIRE gamma
+        # γ=0: no correction (RAW)
+        # γ=1: equivalent to GF-CF symmetric normalization
+        # γ∈(0,1): interpolation, theoretically optimal range
+        self._init_weight()
+
+    def _init_weight(self):
+        X_sp = self.dataset.UserItemNet
+        self.valid_matrix = self.dataset.validUserItemNet.tocsr()
+        self.test_matrix  = self.dataset.testUserItemNet.tocsr()
+        train_start = time()
+
+        import scipy.sparse.linalg as linalg
+
+        rowsum = np.array(X_sp.sum(axis=1)).ravel()
+        colsum = np.array(X_sp.sum(axis=0)).ravel()
+
+        # ASPIRE correction = GF-CF symmetric normalization at γ=1
+        # At γ=0: A_norm = X (no correction)
+        # At γ=1: A_norm = D_u^{-1/2} X D_i^{-1/2} (standard GF-CF)
+        d_u = np.power(rowsum + 1e-12, -self.aspire_alpha / 2.0)
+        d_i = np.power(colsum + 1e-12, -self.aspire_alpha / 2.0)
+        D_u     = sparse.diags(d_u)
+        D_i     = sparse.diags(d_i)
+        D_i_inv = sparse.diags(np.power(colsum + 1e-12, +self.aspire_alpha / 2.0))
+
+        A_norm = D_u @ X_sp @ D_i   # n_users × n_items
+
+        # GF-CF weight matrix in ASPIRE-normalized space
+        _, S, Vt = linalg.svds(A_norm.tocsc(), k=256)
+
+        W_linear = (A_norm.T @ A_norm)
+        W_svd    = (D_i @ Vt.T @ Vt @ D_i_inv)
+
+        self.W = W_linear + self.alpha * W_svd
+        self.W_gpu = torch.tensor(self.W, dtype=torch.float32, device=self.device)
+
         self.train_time = time() - train_start
         self.valid_ndcg, self.valid_undcg = get_valid_score(self, self.dataset)
 
@@ -785,9 +853,9 @@ class RDLAE(BasicModel):
         self.num_items = dataset.m_items
         self.drop_p = config['drop_p']
         self.xi = config['xi']
-        self.__init_weight()
+        self._init_weight()
     
-    def __init_weight(self):
+    def _init_weight(self):
         X = self.dataset.UserItemNet
         train_start = time()
         G = np.array(X.T.dot(X).toarray())
@@ -826,9 +894,9 @@ class EDLAE(BasicModel):
         self.num_users = dataset.n_users
         self.num_items = dataset.m_items
         self.drop_p = config['drop_p']
-        self.__init_weight()
+        self._init_weight()
     
-    def __init_weight(self):
+    def _init_weight(self):
         X = self.dataset.UserItemNet
         train_start = time()
         G = np.array(X.T.dot(X).toarray())
@@ -864,9 +932,9 @@ class IPS_LAE(BasicModel):
         self.reg_lambda = config.get('reg_lambda', 100.0)
         self.wbeta = config.get('wbeta', 0.5)
         self.wtype = config.get('wtype', 'logsigmoid')
-        self.__init_weight()
+        self._init_weight()
 
-    def __init_weight(self):
+    def _init_weight(self):
         X = self.dataset.UserItemNet
         self.valid_matrix = self.dataset.validUserItemNet.tocsr()
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
@@ -902,9 +970,9 @@ class IPS_EASE(BasicModel):
         self.reg_lambda = config.get('reg_lambda', 100.0)
         self.wbeta = config.get('wbeta', 0.5)
         self.wtype = config.get('wtype', 'logsigmoid')
-        self.__init_weight()
+        self._init_weight()
 
-    def __init_weight(self):
+    def _init_weight(self):
         X = self.dataset.UserItemNet
         self.valid_matrix = self.dataset.validUserItemNet.tocsr()
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
@@ -941,9 +1009,9 @@ class IPS_RLAE(BasicModel):
         self.wbeta = config.get('wbeta', 0.5)
         self.wtype = config.get('wtype', 'logsigmoid')
         self.xi = config.get('xi', 0.0)
-        self.__init_weight()
+        self._init_weight()
 
-    def __init_weight(self):
+    def _init_weight(self):
         X = self.dataset.UserItemNet
         self.valid_matrix = self.dataset.validUserItemNet.tocsr()
         self.test_matrix = self.dataset.testUserItemNet.tocsr()
@@ -981,9 +1049,9 @@ class IPS_DLAE(BasicModel):
         self.dropout_p = config.get('dropout_p', 0.3)
         self.wbeta = config.get('wbeta', 0.5)
         self.wtype = config.get('wtype', 'logsigmoid')
-        self.__init_weight()
+        self._init_weight()
 
-    def __init_weight(self):
+    def _init_weight(self):
         X = self.dataset.UserItemNet
         self.valid_matrix = self.dataset.validUserItemNet.tocsr()
         self.test_matrix = self.dataset.testUserItemNet.tocsr()

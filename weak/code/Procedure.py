@@ -7,6 +7,7 @@ import torch
 import utils
 import multiprocessing
 from time import perf_counter
+import math
 
 CORES = multiprocessing.cpu_count() // 2
 
@@ -14,10 +15,25 @@ CORES = multiprocessing.cpu_count() // 2
 def test_one_batch(X):
     sorted_items = X[0].numpy()
     groundTrue = X[1]
+    head_item = X[2]
+    tail_item = X[3]
+    head_groundTrue = []
+    tail_groundTrue = []
     
+    for gt in groundTrue:
+        head_groundTrue.append(list(filter(lambda x: x in head_item, gt)))
+        tail_groundTrue.append(list(filter(lambda x: x in tail_item, gt)))
+
     r = utils.getLabel(groundTrue, sorted_items)
+    head_r = utils.getLabel(head_groundTrue, sorted_items)
+    tail_r = utils.getLabel(tail_groundTrue, sorted_items)
     
     pre, recall, ndcg = [], [], []
+    pre_head, recall_head, ndcg_head = [], [], []
+    pre_tail, recall_tail, ndcg_tail = [], [], []
+    upre, urecall, undcg = [], [], []
+    
+    pscore = world.pscore
 
     for k in world.topks:
         ret = utils.RecallPrecision_ATk(groundTrue, r, k)
@@ -25,9 +41,36 @@ def test_one_batch(X):
         recall.append(ret['recall'])
         ndcg.append(utils.NDCGatK_r(groundTrue, r, k))
         
+        ret_head = utils.RecallPrecision_ATk(head_groundTrue, head_r, k)
+        pre_head.append(ret_head['precision'])
+        recall_head.append(ret_head['recall'])
+        ndcg_head.append(utils.NDCGatK_r(head_groundTrue, head_r, k))
+        
+        ret_tail = utils.RecallPrecision_ATk(tail_groundTrue, tail_r, k)
+        pre_tail.append(ret_tail['precision'])
+        recall_tail.append(ret_tail['recall'])
+        ndcg_tail.append(utils.NDCGatK_r(tail_groundTrue, tail_r, k))
+
+        ret = utils.uRecPrecatK_r(sorted_items, groundTrue, r, k, pscore)
+        upre.append(ret['uprecision'])
+        urecall.append(ret['urecall'])
+        undcg.append(utils.uNDCGatK_r(sorted_items, groundTrue, r, k, pscore))
+
     return {'precision':np.array(pre),
             'recall':np.array(recall),
             'ndcg':np.array(ndcg),
+            
+            'precision(head)':np.array(pre_head),
+            'recall(head)':np.array(recall_head),
+            'ndcg(head)':np.array(ndcg_head),
+            
+            'precision(tail)':np.array(pre_tail),
+            'recall(tail)':np.array(recall_tail),
+            'ndcg(tail)':np.array(ndcg_tail),
+            
+            'urecall':np.array(urecall), 
+            'uprecision':np.array(upre), 
+            'undcg':np.array(undcg),
             }
 
             
@@ -46,6 +89,18 @@ def Test(dataset, Recmodel, multicore=0):
     results = {'precision': np.zeros(len(world.topks)),
                'recall': np.zeros(len(world.topks)),
                'ndcg': np.zeros(len(world.topks)),
+               
+               'precision(head)': np.zeros(len(world.topks)),
+               'recall(head)': np.zeros(len(world.topks)),
+               'ndcg(head)': np.zeros(len(world.topks)),
+               
+               'precision(tail)': np.zeros(len(world.topks)),
+               'recall(tail)': np.zeros(len(world.topks)),
+               'ndcg(tail)': np.zeros(len(world.topks)),
+               
+               'uprecision': np.zeros(len(world.topks)),
+               'urecall': np.zeros(len(world.topks)),
+               'undcg': np.zeros(len(world.topks)),
                }
 
     with torch.no_grad():
@@ -80,8 +135,26 @@ def Test(dataset, Recmodel, multicore=0):
         inference_time = perf_counter()-t
 
         print("Inference time: {:.4f}s".format(inference_time))
+        
+        num_items = dataset.m_items
+        item_counts = np.array(dataset.UserItemNet.sum(axis=0)).squeeze()
+        sorted_by_item_counts = np.argsort(item_counts)[::-1]
+        divide_idx = math.ceil(num_items * 0.2)
+        
+        head_item = sorted_by_item_counts[:divide_idx]
+        tail_item = sorted_by_item_counts[divide_idx:]
+        rep_head_item = np.repeat([head_item], repeats=len(rating_list), axis=0)
+        rep_tail_item = np.repeat([tail_item], repeats=len(rating_list), axis=0)
+
+        head_num, tail_num = 0, 0
+        for gt_list in groundTrue_list:
+            for gt in gt_list:
+                if len(list(filter(lambda x: x in head_item, gt))) != 0:
+                    head_num += 1
+                if len(list(filter(lambda x: x in tail_item, gt))) != 0:
+                    tail_num += 1
                     
-        X = zip(rating_list, groundTrue_list)
+        X = zip(rating_list, groundTrue_list, rep_head_item, rep_tail_item)
 
         if multicore == 1:
             pre_results = pool.map(test_one_batch, X)
@@ -95,9 +168,33 @@ def Test(dataset, Recmodel, multicore=0):
             results['precision'] += result['precision']
             results['ndcg'] += result['ndcg']
             
+            results['precision(head)'] += result['precision(head)']
+            results['recall(head)'] += result['recall(head)']
+            results['ndcg(head)'] += result['ndcg(head)']
+            
+            results['precision(tail)'] += result['precision(tail)']
+            results['recall(tail)'] += result['recall(tail)']
+            results['ndcg(tail)'] += result['ndcg(tail)']
+            
+            results['urecall'] += result['urecall']
+            results['uprecision'] += result['uprecision']
+            results['undcg'] += result['undcg']
+            
         results['precision'] /= float(len(users))
         results['recall'] /= float(len(users))
         results['ndcg'] /= float(len(users))
+        
+        results['precision(head)'] /= head_num
+        results['recall(head)'] /= head_num
+        results['ndcg(head)'] /= head_num
+        
+        results['precision(tail)'] /= tail_num
+        results['recall(tail)'] /= tail_num
+        results['ndcg(tail)'] /= tail_num
+        
+        results['urecall'] /= float(len(users))
+        results['uprecision'] /= float(len(users))
+        results['undcg'] /= float(len(users))
         
         if multicore == 1:
             pool.close()

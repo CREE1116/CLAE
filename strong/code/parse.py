@@ -21,6 +21,8 @@ def parse_args():
     parser.add_argument('--xi', type=float, default=0.0)
     # GF-CF hparams
     parser.add_argument('--alpha', type=float, default=0.0)
+    # ASPIRE hparams
+    parser.add_argument('--aspire_alpha', type=float, default=0.5)
     # CLAE hparams
     parser.add_argument('--reg_lambda', type=float, default=10.0)
     parser.add_argument('--beta', type=float, default=0.5)

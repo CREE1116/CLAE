@@ -4,11 +4,11 @@ import glob
 import ast
 
 def summarize_results():
-    results_dir = 'results'
-    # Pattern to match grid_search files: grid_search_<model>_<dataset>_<setting>.csv
-    # e.g., grid_search_CLAE_steam_strong.csv
-    file_pattern = os.path.join(results_dir, 'grid_search_*.csv')
-    files = glob.glob(file_pattern)
+    results_dirs = ['results']
+    files = []
+    for d in results_dirs:
+        if os.path.exists(d):
+            files.extend(glob.glob(os.path.join(d, 'grid_search_*.csv')))
     
     # Group files by (dataset, setting)
     data_groups = {}
@@ -90,7 +90,10 @@ def summarize_results():
             # Sort by valid_ndcg_100 descending
             summary_df = summary_df.sort_values(by='valid_ndcg_100', ascending=False)
             
-            output_file = os.path.join(results_dir, f"{dataset}_{setting}_comparison.csv")
+            # Use 'results' as the primary output directory for summaries
+            output_dir = 'results'
+            os.makedirs(output_dir, exist_ok=True)
+            output_file = os.path.join(output_dir, f"{dataset}_{setting}_comparison.csv")
             summary_df.to_csv(output_file, index=False)
             print(f"Saved summary to {output_file}")
 
